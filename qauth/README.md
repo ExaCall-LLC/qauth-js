@@ -186,6 +186,12 @@ await org.members.add({ email: "sara@shop.com", roleIds: [nurse.id], invite: tru
 await org.members.setRoles(userId, [nurse.id]); // replaces the person's roles in every space
 await org.members.remove(userId);
 
+// Child organizations: any first admin (a new one is emailed, never a password back);
+// a parent sees a child's people read-only and never manages them
+const kids = await org.subOrgs.list();          // only the children you reach
+const made = await org.subOrgs.create({ name: "Branch", adminEmail: "boss@branch.com" }); // made.invited
+await me.org(made.org.id).members.list();       // read-only for the parent
+
 // Invitations: the person accepts on qAuth's page (existing account, or a new
 // one with a password they choose) and only then joins
 await org.invitations.create({ email: "lina@shop.com", roleIds: [nurse.id], appId, returnUrl: "https://app.example.com/welcome" });
@@ -368,6 +374,14 @@ A "this device" marker in the session list (tokens don't name their session).
 
 ## Changes
 
+- **0.17.0** (2026-11-25): child organizations. `org.subOrgs.list()` and
+  `org.subOrgs.create({ name, adminEmail, levels, isolatedDirectory, levelId, invite })`: the first admin may be
+  anyone, you too (an existing account is added as it is; a new one is emailed, no password comes back).
+  `org.members.resetPassword(userId, { password, changeRequired })` (your own organization). A parent organization
+  never manages a child's people: it sees them read-only, and adding, removing, resetting or giving roles there
+  answers 403. `org.newAdmin` is deprecated (your tenant sets a new admin). `RoleSpec.levelId` and
+  `AppRole.levelId`; `Org` gains `parentOrgId`, `levelId`, `levelName`, `externalId`, `isInternal`. Types
+  `NewSubOrg`, `CreatedSubOrg`, `PasswordReset`. Additions only.
 - **0.16.0** (2026-11-24): levels per product. `MyOrg` gains `parentOrgId`, `levelName`, `isInternal` and
   `levels` (API id -> your tenant's levels there, top first); `GivableRole` gains `levelId`, `levelName`,
   `builtIn` and `reason`; `org.levels()` and `org.newAdmin(email)` (a child's direct parent sets its new admin:

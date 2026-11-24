@@ -239,6 +239,38 @@ test("invitations: create (link once), list, resend, revoke; a member cannot inv
     qauth().as("shop-member-token").org(seed.shop).invitations.create({ email: "y@shop.test", send: false })), (e) => e.status === 403);
 });
 
+test("child organizations: list, create (any first admin; a new one is emailed, never a password); a parent never manages the child's people", async () => {
+  const org = qauth().as("shop-admin-token").org(seed.shop);
+  // the first admin may be the caller (an existing account, added as it is)
+  const self = await org.subOrgs.create({ name: "Self", adminEmail: "admin@shop.test" });
+  assert.equal(self.adminExisting, true);
+  assert.equal(self.initialAdminPassword, undefined);
+  await assert.rejects(qauth().as("shop-member-token").org(seed.shop).subOrgs.create({ name: "X", adminEmail: "x@branch.test" }), (e) => e.status === 403);
+  const made = await org.subOrgs.create({ name: "Branch TS", adminEmail: "boss@branch-ts.test", invite: false });
+  assert.equal(made.invited, true, "from a parent the first admin is always emailed");
+  assert.equal(made.initialAdminPassword, undefined);
+  assert.equal(made.org.parentOrgId, seed.shop);
+  const kids = await org.subOrgs.list();
+  assert.ok(kids.items.some((k) => k.id === made.org.id && k.name === "Branch TS"));
+  // a parent never manages the child's people; it sees them
+  const child = qauth().as("shop-admin-token").org(made.org.id);
+  await assert.rejects(child.members.add({ email: "staff@branch-ts.test" }), (e) => e.status === 403 && /own admins/.test(e.message));
+  const people = await child.members.list();
+  await assert.rejects(child.members.resetPassword(people.items[0].id, { password: "Another-good-pass-9!" }), (e) => e.status === 403);
+  await assert.rejects(child.newAdmin("x@branch-ts.test"), (e) => e.status === 403);
+  // the organization's own key creates children too, with the same rules
+  const viaKey = await qauth().withKey(seed.orgKey).org(seed.shop).subOrgs.create({ name: "Branch key", adminEmail: "boss@branch-key.test" });
+  assert.equal(viaKey.invited, true);
+  assert.equal(viaKey.initialAdminPassword, undefined);
+});
+
+test("roles carry their level", async () => {
+  const org = qauth().as("cafe-admin-token").org(seed.cafe);
+  const r = await org.roles.create(seed.app, { name: "Customer helper", permissions: [], levelId: seed.customerLevel });
+  assert.equal(r.levelId, seed.customerLevel);
+  await org.roles.remove(r.id);
+});
+
 test("company sign-in: not connected, needs a verified domain, admins only", async () => {
   const org = qauth().as("shop-admin-token").org(seed.shop);
   const st = await org.sso.get();

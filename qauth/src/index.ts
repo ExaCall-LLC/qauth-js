@@ -99,7 +99,60 @@ export interface Org {
   mfaRequired: boolean;
   /** Its managed people may also join other organizations. */
   membersMayJoinOthers: boolean;
+  /** Your own id for it, if set. */
+  externalId?: string;
+  /** The parent organization (absent: a top organization). */
+  parentOrgId?: string;
+  /** Its single level label, if it has one. */
+  levelId?: string;
+  levelName?: string;
+  /** Your tenant's own organization. */
+  isInternal?: boolean;
   createdAt: string;
+}
+
+/** A new child organization (`org.subOrgs.create`). */
+export interface NewSubOrg {
+  name: string;
+  /**
+   * Its first admin: anyone, you or someone of your organization too. An
+   * existing account is added as it is; a new one gets its sign-in details
+   * by email (never in the answer to an organization).
+   */
+  adminEmail: string;
+  /**
+   * Levels per API (API id -> level ids), each directly below one of the
+   * parent's levels there. Left out: in each API, the level directly below
+   * the parent's lowest level that has one below it.
+   */
+  levels?: Record<string, string[]>;
+  /** Its own new account pool (white label); otherwise the parent's. */
+  isolatedDirectory?: boolean;
+  /** Its single level label (optional). */
+  levelId?: string;
+  /**
+   * Email the first admin (a new account's one-time password goes in the
+   * email). Always on for a new account when an organization creates its
+   * child: it never sees a password. Your tenant needs a default email channel.
+   */
+  invite?: boolean;
+}
+
+/** A child organization just created. */
+export interface CreatedSubOrg {
+  org: Org;
+  /** Only for your tenant's own admins, when the account was new and not emailed: show once. Never from a parent. */
+  initialAdminPassword?: string;
+  /** The email already had an account in the pool: it was reused. */
+  adminExisting: boolean;
+  /** The first admin was emailed. */
+  invited?: boolean;
+}
+
+/** A member's password reset: `updated`; `emailed` is always false (kept for compatibility). */
+export interface PasswordReset {
+  updated: boolean;
+  emailed: boolean;
 }
 
 /** One role a person holds in an organization, from any space. */
@@ -451,6 +504,8 @@ export interface AppRole {
   permissions: string[];
   /** Organization-management permission keys granted alongside the app role. */
   orgPermissions?: string[];
+  /** Its level (absent: a floating role). */
+  levelId?: string;
   createdAt: string;
 }
 
@@ -461,6 +516,12 @@ export interface RoleSpec {
   permissions: string[];
   /** Optional qAuth organization-management permission keys. */
   orgPermissions?: string[];
+  /**
+   * Its level (your tenant's level id): it holds only that level's
+   * permissions plus floating ones, and is given only where the organization
+   * has the level. Left out: a floating role (floating permissions only).
+   */
+  levelId?: string;
 }
 
 export interface PersonRoles {
@@ -681,12 +742,10 @@ export class OrgClient {
     return this.t.call("GET", this.p("/levels"));
   }
   /**
-   * The child organization's DIRECT parent sets its new admin (needs
-   * org.suborgs.admin.replace in a role of the level directly above it, or
-   * the parent's key with qauth:org:members). Never the caller nor anyone of
-   * the parent or above. An existing member gets the roles a first admin
-   * gets and the built-in Admin of each of its levels (`userId`); anyone
-   * else is invited by email (`invited`). No password ever comes back.
+   * @deprecated Since 0.17.0 a parent organization never manages a child's
+   * people: setting a new admin of an organization that lost its admins is
+   * your tenant's (Console, or `POST /tenant/orgs/{id}/new-admin`). From an
+   * organization this answers 403.
    */
   newAdmin(email: string): Promise<NewAdminResult> {
     return this.t.call("POST", this.p("/new-admin"), { email });
@@ -701,6 +760,26 @@ export class OrgClient {
     setRoles: (userId: string, roleIds: string[]): Promise<{ updated: boolean }> =>
       this.t.call("PUT", this.p(`/members/${seg(userId)}/roles`), { roleIds }),
     remove: (userId: string): Promise<{ removed: boolean }> => this.t.call("DELETE", this.p(`/members/${seg(userId)}`)),
+    /**
+     * Set a member's new password (directory rules apply; needs
+     * org.people.reset_password in this organization). Only the
+     * organization's own admins, its own key and your tenant can: a parent
+     * organization never manages a child's people (403).
+     */
+    resetPassword: (userId: string, opts: { password?: string; changeRequired?: boolean } = {}): Promise<PasswordReset> =>
+      this.t.call("POST", this.p(`/members/${seg(userId)}/reset-password`), opts),
+  };
+
+  /**
+   * Child organizations. `list` shows only the children you reach (through
+   * a level: one level below). `create` needs org.suborgs.create in a role
+   * of the level directly above each level the child gets (or this
+   * organization's API key with qauth:org:members). A parent sees its
+   * children and their people (read-only); it never manages their people.
+   */
+  readonly subOrgs = {
+    list: (): Promise<Page<Org>> => this.t.list(this.p("/suborgs")),
+    create: (s: NewSubOrg): Promise<CreatedSubOrg> => this.t.call("POST", this.p("/suborgs"), s),
   };
 
   /**
