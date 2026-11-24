@@ -91,6 +91,7 @@ declare const clientId: string;
 declare const clientSecret: string;
 declare const presentedKey: string;
 declare const orgApiKey: string;
+declare const pictureBase64: string;
 declare const jwksUri: string;
 declare const discovery: { jwks_uri: string };
 declare const allowed: string[];

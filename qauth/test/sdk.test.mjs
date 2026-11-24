@@ -103,6 +103,35 @@ test("domains: add, list, verify (TXT missing), remove", async () => {
   assert.deepEqual(await org.domains.remove(d.id), { removed: true });
 });
 
+test("branding and the sign-in page design: set, read, picture, reset", async () => {
+  const org = qauth().as("shop-admin-token").org(seed.shop);
+  const b = await org.branding.set({ displayName: "Shop", accent: "#123456" });
+  assert.equal(b.accent, "#123456");
+  // a 1x1 PNG
+  const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=";
+  const pic = await org.design.addPicture(png);
+  assert.equal(pic.contentType, "image/png");
+  const v = await org.design.set({
+    accent: "#123456",
+    design: {
+      layout: "split",
+      formSide: "end",
+      panel: { background: { kind: "image", image: pic.hash, overlay: "#FFFFFF", overlayOpacity: 88 }, blocks: [{ id: "h", type: "heading", text: { en: "Welcome", ar: "مرحبًا" }, size: "m" }] },
+    },
+  });
+  assert.equal(v.own, true);
+  assert.equal(v.look.design.layout, "split");
+  assert.equal((await org.branding.get()).design.panel?.blocks[0].id, "h");
+  assert.ok(v.limits.fonts.includes("Cairo"));
+  // links are https only; text is plain
+  await assert.rejects(
+    org.design.set({ design: { layout: "split", panel: { background: { kind: "color" }, blocks: [{ id: "l", type: "link", url: "http://shop.test", label: { en: "x", ar: "x" } }] } } }),
+    (e) => e instanceof QAuthError && (e.status === 400 || e.status === 422) && /https/.test(e.message),
+  );
+  assert.deepEqual(await org.design.reset(), { removed: true });
+  assert.equal((await org.design.get()).own, false);
+});
+
 test("API keys: create (secret once), list, validate, revoke", async () => {
   const q = qauth();
   const org = q.as("shop-admin-token").org(seed.shop);

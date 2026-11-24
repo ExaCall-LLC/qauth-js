@@ -138,6 +138,102 @@ export interface AddedMember {
   invited?: boolean;
 }
 
+/** An organization's white-label sign-in look (logo, colours, light or dark, language) and its design. */
+export interface Branding {
+  appId?: string;
+  orgId?: string;
+  displayName?: string;
+  accent: string;
+  background: string;
+  mode: "auto" | "light" | "dark";
+  language: "auto" | "en" | "ar";
+  hasLogo: boolean;
+  logoUrl?: string;
+  design: Design;
+  updatedAt?: string;
+}
+
+/** Changes a look. `logo` is base64 (PNG, JPEG or WebP); empty colours inherit; no `design` keeps the saved one. */
+export interface BrandingSpec {
+  displayName?: string;
+  logo?: string;
+  removeLogo?: boolean;
+  accent?: string;
+  /** The page background, #rrggbb. */
+  background?: string;
+  mode?: "auto" | "light" | "dark";
+  language?: "auto" | "en" | "ar";
+  design?: Design;
+}
+
+/** A text in English and Arabic (plain text). */
+export interface I18nText {
+  en: string;
+  ar: string;
+}
+
+/**
+ * A side-panel block: heading (text, size, align, color), text (text, align,
+ * color), image (image = a picture's hash, alt, width, align), list (items,
+ * color), link (label, url: https only, style link|filled|outline, align) or
+ * spacer (size). `id` is the block's own.
+ */
+export interface DesignBlock {
+  id: string;
+  type: "heading" | "text" | "image" | "list" | "link" | "spacer";
+  text?: I18nText;
+  size?: "s" | "m" | "l";
+  align?: "start" | "center" | "end";
+  color?: string;
+  image?: string;
+  alt?: I18nText;
+  width?: number;
+  items?: { en: string[]; ar: string[] };
+  label?: I18nText;
+  url?: string;
+  style?: "link" | "filled" | "outline";
+}
+
+/** A sign-in look's layout, form-side settings and side panel. Empty values inherit. */
+export interface Design {
+  layout?: "simple" | "split";
+  /** Logical: mirrors in Arabic. */
+  formSide?: "start" | "end";
+  /** The form side's colour, #rrggbb. */
+  panelBackground?: string;
+  text?: string;
+  corners?: "sharp" | "soft" | "round";
+  button?: "filled" | "outline";
+  /** One of `DesignView.limits.fonts`. */
+  font?: string;
+  securedBy?: boolean;
+  /** The sign-in step's own title and subtitle (empty = qAuth's words). */
+  texts?: { en: { title: string; subtitle: string }; ar: { title: string; subtitle: string } };
+  panel?: {
+    background: { kind: "color" | "gradient" | "image"; color?: string; from?: string; to?: string; angle?: number; image?: string; overlay?: string; overlayOpacity?: number };
+    blocks: DesignBlock[];
+  };
+  phone?: "hidden" | "banner";
+}
+
+/** An organization's look as qAuth answers it: its own, what it inherits, the platform's limits. */
+export interface DesignView {
+  level: "tenant" | "app" | "org";
+  own: boolean;
+  look: Branding;
+  inherited: Branding;
+  inheritedFrom: { level: "builtin" | "tenant" | "app" | "org"; id?: string; name?: string };
+  limits: { fonts: string[]; logoMaxKb: number; imageMaxKb: number; maxBlocks: number; shortTextMax: number; longTextMax: number; listItemsMax: number };
+  name?: string;
+}
+
+/** A picture kept for designs; designs name it by `hash`. */
+export interface DesignFile {
+  hash: string;
+  contentType: string;
+  size: number;
+}
+
 export interface OrgDomain {
   id: string;
   orgId: string;
@@ -574,6 +670,30 @@ export class OrgClient {
     get: (): Promise<SSOState> => this.t.call("GET", this.p("/sso")),
     set: (s: SSOSpec): Promise<SSOState> => this.t.call("PUT", this.p("/sso"), s),
     remove: (): Promise<{ removed: boolean }> => this.t.call("DELETE", this.p("/sso")),
+  };
+
+  /**
+   * The white-label sign-in look (logo, colours, light or dark, language).
+   * No `app` = the organization's own; an app's id = its look for that app.
+   */
+  readonly branding = {
+    get: (app?: string): Promise<Branding> => this.t.call("GET", this.p("/branding"), undefined, { app }),
+    set: (spec: BrandingSpec, app?: string): Promise<Branding> => this.t.call("PUT", this.p("/branding"), spec, { app }),
+    remove: (app?: string): Promise<{ removed: boolean }> => this.t.call("DELETE", this.p("/branding"), undefined, { app }),
+  };
+
+  /**
+   * The sign-in page design: the look with its layout (simple or split, form
+   * at the start or end), form-side settings and side panel. Admins with
+   * settings rights change it. No `app` = the organization's own look.
+   */
+  readonly design = {
+    get: (app?: string): Promise<DesignView> => this.t.call("GET", this.p("/design"), undefined, { app }),
+    set: (spec: BrandingSpec, app?: string): Promise<DesignView> => this.t.call("PUT", this.p("/design"), spec, { app }),
+    /** Inherit again. */
+    reset: (app?: string): Promise<{ removed: boolean }> => this.t.call("DELETE", this.p("/design"), undefined, { app }),
+    /** Keep a picture (PNG, JPEG, WebP or GIF as base64); use its `hash` in the panel. */
+    addPicture: (base64: string): Promise<DesignFile> => this.t.call("POST", this.p("/design/files"), { data: base64 }),
   };
 
   readonly domains = {

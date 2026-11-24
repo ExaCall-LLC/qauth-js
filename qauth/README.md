@@ -18,7 +18,7 @@ One runtime dependency: [`jose`](https://github.com/panva/jose) for token signat
 Public, no account or token needed:
 
 ```bash
-npm install https://github.com/ExaCall-LLC/qauth-js/releases/download/qauth-v0.14.0/isdlc.ai-qauth-0.14.0.tgz
+npm install https://github.com/ExaCall-LLC/qauth-js/releases/download/qauth-v0.15.0/isdlc.ai-qauth-0.15.0.tgz
 ```
 
 Every version is a release of [github.com/ExaCall-LLC/qauth-js](https://github.com/ExaCall-LLC/qauth-js/releases)
@@ -368,6 +368,10 @@ A "this device" marker in the session list (tokens don't name their session).
 
 ## Changes
 
+- **0.15.0** (2026-11-24): `org.branding` (`get`, `set`, `remove`: the white-label look, as the Go SDK has) and
+  `org.design` (`get`, `set`, `reset`, `addPicture`): the organization's sign-in page design with its layout (simple
+  or split, form at the start or end), form-side settings, side-panel blocks and the platform's limits. Types
+  `Branding`, `BrandingSpec`, `Design`, `DesignBlock`, `DesignView`, `DesignFile`.
 - **0.14.0** (2026-11-24): `new QAuth({ issuer, clientId, apiKey? })`: set up from your tenant's issuer and your
   app's client id alone. qAuth's API address is read once from the issuer's discovery document (`qauth_api`; the
   document must name the issuer, the address must be https://, http:// only on localhost; redirects never followed;
