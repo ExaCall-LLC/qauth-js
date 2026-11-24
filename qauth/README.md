@@ -18,7 +18,7 @@ One runtime dependency: [`jose`](https://github.com/panva/jose) for token signat
 Public, no account or token needed:
 
 ```bash
-npm install https://github.com/ExaCall-LLC/qauth-js/releases/download/qauth-v0.15.0/isdlc.ai-qauth-0.15.0.tgz
+npm install https://github.com/ExaCall-LLC/qauth-js/releases/download/qauth-v0.16.0/isdlc.ai-qauth-0.16.0.tgz
 ```
 
 Every version is a release of [github.com/ExaCall-LLC/qauth-js](https://github.com/ExaCall-LLC/qauth-js/releases)
@@ -368,6 +368,11 @@ A "this device" marker in the session list (tokens don't name their session).
 
 ## Changes
 
+- **0.16.0** (2026-11-24): levels per product. `MyOrg` gains `parentOrgId`, `levelName`, `isInternal` and
+  `levels` (API id -> your tenant's levels there, top first); `GivableRole` gains `levelId`, `levelName`,
+  `builtIn` and `reason`; `org.levels()` and `org.newAdmin(email)` (a child's direct parent sets its new admin:
+  an existing member gets the roles, anyone else is invited by email; never a password). Types `LevelRef`,
+  `OrgLevels`, `NewAdminResult`. Additions only.
 - **0.15.0** (2026-11-24): `org.branding` (`get`, `set`, `remove`: the white-label look, as the Go SDK has) and
   `org.design` (`get`, `set`, `reset`, `addPicture`): the organization's sign-in page design with its layout (simple
   or split, form at the start or end), form-side settings, side-panel blocks and the platform's limits. Types

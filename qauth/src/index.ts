@@ -49,6 +49,38 @@ export interface MyOrg {
   id: string;
   name: string;
   role: Role;
+  /** The parent organization (absent: a top organization). */
+  parentOrgId?: string;
+  /** The organization's tenant level name, if it has one. */
+  levelName?: string;
+  /** Your tenant's own organization. */
+  isInternal: boolean;
+  /**
+   * Its levels in each API (API id -> levels, top first): your tenant's
+   * level names. Empty: no levels (everything works as without levels).
+   */
+  levels: Record<string, LevelRef[]>;
+}
+
+/** One level of your tenant (Operator, Provider, Customer…). */
+export interface LevelRef {
+  id: string;
+  name: string;
+}
+
+/** What setting a child's new admin did (never a password). */
+export interface NewAdminResult {
+  /** An existing member who got the admin roles. */
+  userId?: string;
+  /** An invitation went to the email. */
+  invited: boolean;
+  invitationId?: string;
+}
+
+/** An organization's levels in each API (API id -> level ids). */
+export interface OrgLevels {
+  orgId: string;
+  levels: Record<string, string[]>;
 }
 
 export interface Profile {
@@ -97,6 +129,13 @@ export interface GivableRole {
   canGive: boolean;
   /** Why it can't be given: what the caller lacks (names). */
   missing?: string[];
+  /** The role's level (absent: floating) and its name. */
+  levelId?: string;
+  levelName?: string;
+  /** The level's built-in Admin (always every permission of that level). */
+  builtIn?: boolean;
+  /** Why it can't be given here: the organization lacks its level for that API. */
+  reason?: string;
 }
 
 export interface Member {
@@ -636,6 +675,21 @@ export class OrgClient {
   /** The apps this org can use. */
   apps(): Promise<Page<App>> {
     return this.t.list(this.p("/apps"));
+  }
+  /** The organization's levels in each API. */
+  levels(): Promise<OrgLevels> {
+    return this.t.call("GET", this.p("/levels"));
+  }
+  /**
+   * The child organization's DIRECT parent sets its new admin (needs
+   * org.suborgs.admin.replace in a role of the level directly above it, or
+   * the parent's key with qauth:org:members). Never the caller nor anyone of
+   * the parent or above. An existing member gets the roles a first admin
+   * gets and the built-in Admin of each of its levels (`userId`); anyone
+   * else is invited by email (`invited`). No password ever comes back.
+   */
+  newAdmin(email: string): Promise<NewAdminResult> {
+    return this.t.call("POST", this.p("/new-admin"), { email });
   }
 
   readonly members = {

@@ -43,6 +43,13 @@ test("profile and organizations of the signed-in person", async () => {
   assert.equal(p.email, "admin@shop.test");
   assert.deepEqual(p.orgs.map((o) => [o.id, o.role]), [[seed.shop, "admin"]]);
   const orgs = await me.orgs();
+  assert.deepEqual(orgs.items[0].levels, {}, "Shop has no levels");
+  // levels per product: Cafe is a Customer of the API
+  const cafe = await qauth().as("cafe-admin-token").orgs();
+  assert.deepEqual(cafe.items[0].levels[seed.api], [{ id: seed.customerLevel, name: "Customer" }]);
+  assert.equal(cafe.items[0].isInternal, false);
+  const lv = await qauth().as("cafe-admin-token").org(seed.cafe).levels();
+  assert.deepEqual(lv.levels[seed.api], [seed.customerLevel]);
   assert.equal(orgs.items.length, 1);
   assert.equal(orgs.pagination.total, 1);
   // paging as qAuth sends it, plus the deprecated camelCase copy
