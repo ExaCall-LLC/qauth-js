@@ -1,0 +1,41 @@
+# Turns a pushed release tag into a GitHub Release with its npm tarball.
+#
+# qAuth's CI pushes the tag (qauth-vX.Y.Z or qauth-screens-vX.Y.Z) on a commit
+# that carries the tarball it packed, release/isdlc.ai-<name>-X.Y.Z.tgz; this
+# workflow only attaches that file. This file is copied from qAuth's repository
+# (sdk/public/qauth-js); change it there.
+name: release
+
+on:
+  push:
+    tags: ["qauth-v*", "qauth-screens-v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: attach the tarball to a release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          case "$TAG" in
+            qauth-screens-v*) pkg=qauth-screens; ver=${TAG#qauth-screens-v} ;;
+            qauth-v*) pkg=qauth; ver=${TAG#qauth-v} ;;
+            *) echo "::error::unknown tag $TAG"; exit 1 ;;
+          esac
+          file="release/isdlc.ai-$pkg-$ver.tgz"
+          test -f "$file" || { echo "::error::$file is missing on $TAG"; exit 1; }
+          got=$(tar -xzOf "$file" package/package.json | node -p 'const p=JSON.parse(require("fs").readFileSync(0));p.name+"@"+p.version')
+          test "$got" = "@isdlc.ai/$pkg@$ver" || { echo "::error::$file holds $got"; exit 1; }
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "release $TAG exists; nothing to do"; exit 0
+          fi
+          url="https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG/isdlc.ai-$pkg-$ver.tgz"
+          printf '`@isdlc.ai/%s` %s. Install:\n\n```sh\nnpm install %s\n```\n\nChanges: see the package README (`%s/README.md`), section "Changes".\n' \
+            "$pkg" "$ver" "$url" "$pkg" > "$RUNNER_TEMP/notes.md"
+          gh release create "$TAG" "$file" --title "@isdlc.ai/$pkg $ver" --notes-file "$RUNNER_TEMP/notes.md" --verify-tag
