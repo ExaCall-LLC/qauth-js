@@ -221,6 +221,19 @@ test("the org's audit log shows what was done through the API", async () => {
   const page = await org.audit({ limit: 5 });
   assert.ok(page.items.some((e) => e.type === "orgs.members.created"));
   await assert.rejects(qauth().as("shop-member-token").org(seed.shop).audit(), (e) => e.status === 403);
+  // the filters: who did it, the result, and each event's who/what/where
+  const mine = await org.audit({ type: "orgs.members.", result: "success", limit: 5 });
+  const added = mine.items.find((e) => e.type === "orgs.members.created");
+  assert.ok(added && added.result === "success" && added.actorType === "person" && added.requestId);
+  assert.ok(mine.items.every((e) => e.result === "success" && e.type.startsWith("orgs.members.")));
+});
+
+test("my recent activity: my own events only", async () => {
+  const me = qauth().as("shop-admin-token");
+  const page = await me.account.activity({ limit: 20 });
+  assert.ok(page.items.length > 0);
+  assert.ok(page.items.every((e) => e.actor === "shop-admin" || e.target === "shop-admin"), JSON.stringify(page.items.slice(0, 2)));
+  assert.ok(page.items.every((e) => e.changes === undefined));
 });
 
 test("invitations: create (link once), list, resend, revoke; a member cannot invite", async () => {
@@ -387,4 +400,60 @@ test("a role change shows at once (qAuth drops its kept answers; SDK cache off)"
   await org.assignments.set({ appId: seed.app, userId: id, roleIds: [] });
   assert.equal(await qa.can("shop-admin-token", scope, "contacts:read"), false, "a removed role stops at once");
   await org.roles.remove(role.id);
+});
+
+test("my devices: list with counts, approve a TV code, rename, pairing code, sign out; org admins end devices", async () => {
+  const me = qauth().as("cafe-admin-token");
+  let list = await me.account.devices.list({ app: seed.app, session: "laptop-1" });
+  assert.equal(list.devices.length, 1);
+  assert.equal(list.devices[0].name, "Office laptop");
+  assert.equal(list.devices[0].current, true);
+  assert.deepEqual(list.counts.map((c) => [c.type, c.inUse, c.limit]), [["", 1, 3], ["tv", 0, 2], ["phone", 0, 0], ["computer", 1, 0], ["other", 0, 0]]);
+  assert.deepEqual(list.apps.map((a) => [a.id, a.pairing]), [[seed.app, true]]);
+  // the TV waiting with BKRT-JMXL: shown before approving, then approved
+  const waiting = await me.account.devices.lookup("bkrt jmxl");
+  assert.equal(waiting.deviceName, "Living room TV");
+  assert.equal(waiting.appName, "Omni");
+  assert.equal(waiting.typeMax, 2);
+  assert.equal(waiting.choices.length, 3);
+  assert.ok(waiting.choices.includes(seed.tvNumber));
+  assert.equal(waiting.otherNetwork, true); // the TV asked from 203.0.113.7
+  await assert.rejects(qauth().as("shop-member-token").account.devices.lookup("WRONGCDE"), (e) => e.status === 422);
+  // another network: the person must confirm
+  await assert.rejects(me.account.devices.approve("BKRT-JMXL", { number: seed.tvNumber, clientId: "omni-web" }), (e) => e.status === 409 && e.code === "CONFIRM_PLACE");
+  assert.deepEqual(await me.account.devices.approve("BKRT-JMXL", { number: seed.tvNumber, confirmPlace: true, clientId: "omni-web" }), { decision: "approve", device: "Living room TV" });
+  list = await me.account.devices.list({ app: seed.app });
+  const tv = list.devices.find((d) => d.type === "tv");
+  assert.equal(tv.kind, "code");
+  assert.equal(list.counts[1].inUse, 1);
+  // another person can't touch it
+  await assert.rejects(qauth().as("shop-member-token").account.devices.signOut(tv.id), (e) => e.status === 404);
+  const renamed = await me.account.devices.update(tv.id, { name: "Bedroom TV", shared: true });
+  assert.equal(renamed.name, "Bedroom TV");
+  assert.equal(renamed.shared, true);
+  await assert.rejects(me.account.devices.pairingCode(seed.app), (e) => e.status === 403 && e.code === "FRESH_SIGN_IN_REQUIRED"); // no client named
+  const pc = await me.account.devices.pairingCode(seed.app, { clientId: "omni-web" });
+  assert.match(pc.code, /^[A-HJ-NP-Z2-9]{8}$/);
+  assert.ok(!pc.url.includes(pc.code), "a pairing code never sits in a link");
+  // Cafe's admin sees and ends a member's TV through the org API (another org's admin can't)
+  const cafe = qauth().as("cafe-admin-token").org(seed.cafe);
+  const theirs = await cafe.members.devices("cafe-admin");
+  assert.equal(theirs.items.length, 2);
+  await assert.rejects(qauth().as("shop-admin-token").org(seed.shop).members.devices("cafe-admin"), (e) => e.status === 403 || e.status === 404);
+  assert.equal((await cafe.members.endDevice("cafe-admin", tv.id)).removed, true);
+  await assert.rejects(me.account.devices.signOutAll({ type: "computer" }), (e) => e.status === 400); // which one is mine?
+  assert.equal((await me.account.devices.signOutAll({ type: "computer", includeCurrent: true })).count, 1);
+  assert.equal((await me.account.devices.list()).devices.length, 0);
+});
+
+test("an organization makes an app's session settings stricter, never looser", async () => {
+  const shop = qauth().as("shop-admin-token").org(seed.shop);
+  const v = await shop.sessionSettings.get(seed.app);
+  assert.equal(v.app.maxSessions, 3);
+  await assert.rejects(shop.sessionSettings.set(seed.app, { maxSessions: 5 }), (e) => e.status === 422);
+  await assert.rejects(shop.sessionSettings.set(seed.app, { phoneSignIn: true }), (e) => e.status === 422);
+  const set = await shop.sessionSettings.set(seed.app, { maxSessions: 2, atLimit: "refuse" });
+  assert.equal(set.effective.maxSessions, 2);
+  assert.equal(set.effective.atLimit, "refuse");
+  assert.deepEqual((await shop.sessionSettings.set(seed.app, {})).override, {});
 });

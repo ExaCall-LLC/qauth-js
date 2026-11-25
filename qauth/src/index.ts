@@ -536,9 +536,55 @@ export interface AuditEntry {
   type: string;
   actor?: string;
   actorName?: string;
+  /** person, api_key, platform_admin, setup_key or system. */
+  actorType?: string;
+  /** The actor's name at the time (email, key name). */
+  actorDisplay?: string;
+  /** The organization through which a parent acted on a child organization. */
+  actingOrgId?: string;
+  targetType?: string;
   target?: string;
+  targetName?: string;
+  /** success, refused or failed. */
+  result?: "success" | "refused" | "failed";
+  /** Why it was refused or failed (a short code). */
+  reason?: string;
+  /** The fields a change touched, before and after (secrets redacted). */
+  changes?: Record<string, { before: unknown; after: unknown }>;
+  ip?: string;
+  userAgent?: string;
+  requestId?: string;
+  orgId?: string;
+  appId?: string;
   at: string;
+  /** The event's place in the log's hash chain. */
+  seq?: number;
+  hash?: string;
+  /** The event's own id (unique; not part of the hash). */
+  uid?: string;
   [k: string]: unknown;
+}
+
+/** The audit log's filters (the same on every audit list). */
+export interface AuditQuery {
+  limit?: number;
+  /** An event id: events older than it (the next page). */
+  before?: number;
+  /** Event types starting with this, e.g. "signin.". */
+  type?: string;
+  /** Prefixes, comma-separated (a type group). */
+  group?: string;
+  /** An id, or part of a name or email. */
+  actor?: string;
+  target?: string;
+  result?: "success" | "refused" | "failed";
+  app?: string;
+  ip?: string;
+  /** A request id (X-Request-ID). */
+  request?: string;
+  /** RFC 3339 time or YYYY-MM-DD. */
+  from?: string;
+  to?: string;
 }
 
 export interface Effective {
@@ -702,7 +748,9 @@ class Transport {
     if (!res.ok || env.success === false) {
       const err = (env.error ?? {}) as { code?: string; message?: string; fields?: Record<string, string[]> };
       const meta = (env.meta ?? {}) as { request_id?: string };
-      throw new QAuthError(res.status, err.code ?? "ERROR", err.message ?? String(env.message ?? `HTTP ${res.status}`), meta.request_id ?? res.headers.get("x-request-id") ?? undefined, err.fields, retryAfter);
+      const e = new QAuthError(res.status, err.code ?? "ERROR", err.message ?? String(env.message ?? `HTTP ${res.status}`), meta.request_id ?? res.headers.get("x-request-id") ?? undefined, err.fields, retryAfter);
+      if (env.data !== undefined && env.data !== null) e.data = env.data;
+      throw e;
     }
     return env;
   }
@@ -768,6 +816,13 @@ export class OrgClient {
      */
     resetPassword: (userId: string, opts: { password?: string; changeRequired?: boolean } = {}): Promise<PasswordReset> =>
       this.t.call("POST", this.p(`/members/${seg(userId)}/reset-password`), opts),
+    /** Admins: a member's signed-in devices in the apps this organization uses. */
+    devices: (userId: string): Promise<Page<Device>> => this.t.list(this.p(`/members/${seg(userId)}/devices`)),
+    /** Admins: end one of a member's devices (never rename or add one for them). */
+    endDevice: (userId: string, deviceId: string): Promise<{ removed: boolean; count: number }> =>
+      this.t.call("DELETE", this.p(`/members/${seg(userId)}/devices/${seg(deviceId)}`)),
+    /** Admins: end all of a member's devices in the apps this organization uses. */
+    endDevices: (userId: string): Promise<{ removed: boolean; count: number }> => this.t.call("DELETE", this.p(`/members/${seg(userId)}/devices`)),
   };
 
   /**
@@ -780,6 +835,17 @@ export class OrgClient {
   readonly subOrgs = {
     list: (): Promise<Page<Org>> => this.t.list(this.p("/suborgs")),
     create: (s: NewSubOrg): Promise<CreatedSubOrg> => this.t.call("POST", this.p("/suborgs"), s),
+  };
+
+  /**
+   * Sessions & devices for one app, made stricter for this organization's
+   * people (never looser than the app's: qAuth refuses that with 422).
+   */
+  readonly sessionSettings = {
+    get: (appId: string): Promise<OrgSessionSettingsView> => this.t.call("GET", this.p(`/apps/${seg(appId)}/session-settings`)),
+    /** `{}` goes back to the app's settings. */
+    set: (appId: string, override: OrgSessionSettings): Promise<OrgSessionSettingsView> =>
+      this.t.call("PUT", this.p(`/apps/${seg(appId)}/session-settings`), override),
   };
 
   /**
@@ -860,8 +926,8 @@ export class OrgClient {
   };
 
   /** Admins: the org's audit log, newest first. `before` is an event id. */
-  audit(q: { limit?: number; before?: number; type?: string } = {}): Promise<Page<AuditEntry>> {
-    return this.t.list(this.p("/audit"), q);
+  audit(q: AuditQuery = {}): Promise<Page<AuditEntry>> {
+    return this.t.list(this.p("/audit"), q as Query);
   }
 }
 
@@ -929,6 +995,12 @@ export class PersonClient {
    */
   readonly account = {
     security: (): Promise<MySecurity> => this.t.call("GET", "/v1/me/security"),
+    /**
+     * The person's recent activity, newest first: their sign-ins and
+     * sign-outs (device, address), refused sign-ins, password, second-step,
+     * passkey and token changes, and what an admin did to their account.
+     */
+    activity: (q: Omit<AuditQuery, "actor" | "target"> = {}): Promise<Page<AuditEntry>> => this.t.list("/v1/me/activity", q as Query),
     changePassword: (current: string, next: string): Promise<{ updated: boolean }> =>
       this.t.call("PUT", "/v1/me/password", { current, new: next }),
     authenticator: {
@@ -966,6 +1038,52 @@ export class PersonClient {
         this.t.call("POST", `/v1/me/sessions/${seg(sessionId)}/activity${clientQuery(clientId)}`),
     },
     /**
+     * My account › Devices: everywhere the person is signed in to the
+     * tenant's apps, with rename, mark shared, sign out one or every device
+     * of a type; pairing codes (Add a device); and approving a TV's code.
+     */
+    devices: {
+      /**
+       * `app`: show the counts against that app's limits. `session`: the sid of your ID token
+       * (`sessionIdOf(idToken)`): access tokens carry none, so without it no device is `current`.
+       */
+      list: (opts: { app?: string; session?: string } = {}): Promise<DeviceList> => this.t.call("GET", "/v1/me/devices", undefined, opts),
+      /** Rename a device, or mark it shared (signs out sooner when idle; counts as a kiosk). */
+      update: (deviceId: string, change: { name?: string; shared?: boolean }): Promise<Device> =>
+        this.t.call("PUT", `/v1/me/devices/${seg(deviceId)}`, change),
+      signOut: (deviceId: string): Promise<{ removed: boolean }> => this.t.call("DELETE", `/v1/me/devices/${seg(deviceId)}`),
+      /**
+       * Every device of a type (and app). Name your own device so it stays signed in (`session`:
+       * your ID token's sid, or `keep`: its device id), or pass `includeCurrent` to sign it out
+       * too; with neither qAuth answers 400 (it never guesses which device is yours).
+       */
+      signOutAll: (opts: { type?: DeviceType; app?: string; session?: string; keep?: string; includeCurrent?: boolean } = {}): Promise<{ removed: boolean; count: number }> =>
+        this.t.call("DELETE", "/v1/me/devices", undefined, {
+          type: opts.type, app: opts.app, session: opts.session, keep: opts.keep, includeCurrent: opts.includeCurrent ? "true" : undefined,
+        }),
+      /**
+       * Add a device: a single-use code (no I, O, 0 or 1) the device types under "Enter a pairing code".
+       * Needs a recent sign-in to your app (a step-up when the app asks a second step): else 403
+       * `FRESH_SIGN_IN_REQUIRED`. `clientId`: your OAuth client, when your access token doesn't name it.
+       */
+      pairingCode: (appId: string, opts: { clientId?: string } = {}): Promise<PairingCode> =>
+        this.t.call("POST", "/v1/me/pairing-codes", { appId }, { client: opts.clientId }),
+      /** The device waiting for a TV code (or a computer's QR): show it before approving. Wrong codes count. */
+      lookup: (code: string): Promise<WaitingDevice> => this.t.call("GET", `/v1/me/device-approvals/${seg(code)}`),
+      /**
+       * Approve: the device gets its own session. `number`: the one the
+       * person picked from `lookup(code).choices` (the device shows it; a
+       * wrong pick refuses the device for good). A device on another network
+       * throws 409 `CONFIRM_PLACE` until the person confirms (`confirmPlace`).
+       * At the app's limit: 409 `SESSION_LIMIT` with the sessions in
+       * `error.data.sessions`; pass the ones the person picked in `signOut`.
+       * Needs a recent sign-in to your app (403 `FRESH_SIGN_IN_REQUIRED`).
+       */
+      approve: (code: string, opts: { number?: number; confirmPlace?: boolean; signOut?: string[]; clientId?: string } = {}): Promise<{ decision: "approve"; device: string }> =>
+        this.t.call("POST", `/v1/me/device-approvals/${seg(code)}`, { decision: "approve", number: opts.number, confirmPlace: opts.confirmPlace, signOut: opts.signOut ?? [] }, { client: opts.clientId }),
+      deny: (code: string): Promise<{ decision: "deny"; device: string }> => this.t.call("POST", `/v1/me/device-approvals/${seg(code)}`, { decision: "deny" }),
+    },
+    /**
      * The person's latest step-up for your OAuth client (null = none). Pair
      * it with stepUp: remember when you sent them, and accept the step-up
      * only if `isFreshStepUp(record, startedAt)`.
@@ -979,6 +1097,127 @@ export class PersonClient {
       }
     },
   };
+}
+
+/** A device type sessions count as. */
+export type DeviceType = "tv" | "phone" | "computer" | "other";
+
+/** One signed-in device (one app session). */
+export interface Device {
+  id: string;
+  name: string;
+  type: DeviceType;
+  /** signin | code (a TV code) | pairing | phone (a computer signed in with a phone). */
+  kind: string;
+  shared: boolean;
+  appId: string;
+  appName: string;
+  clientId: string;
+  place: string;
+  startedAt: string;
+  lastActiveAt: string;
+  /** The device the call came from. */
+  current: boolean;
+}
+
+/** How many devices are in use against a limit (type "" = all together; limit 0 = none). */
+export interface DeviceCount {
+  type: "" | DeviceType;
+  inUse: number;
+  limit: number;
+}
+
+export interface DeviceList {
+  devices: Device[];
+  appId?: string;
+  counts?: DeviceCount[];
+  /** Apps the person can add a device to. */
+  apps: { id: string; name: string; pairing: boolean }[];
+}
+
+export interface PairingCode {
+  code: string;
+  appId: string;
+  appName: string;
+  expiresAt: string;
+  /** The app's device sign-in address (never the code itself). */
+  url: string;
+}
+
+/** A device waiting for approval, as the person sees it before approving. */
+export interface WaitingDevice {
+  id: string;
+  kind: "tv" | "phone";
+  userCode: string;
+  deviceName: string;
+  deviceType: DeviceType;
+  shared: boolean;
+  appId: string;
+  appName: string;
+  place: string;
+  askedAt: string;
+  expiresAt: string;
+  /** The app asks a second step: approve on the sign-in page (/tv) instead. */
+  secondStep: boolean;
+  /** Number matching: the device shows one of these; the person picks it (none = off). */
+  choices?: number[];
+  /** The device is on another network than the person approving (`approverPlace`): warn, and confirm. */
+  otherNetwork: boolean;
+  approverPlace?: string;
+  /** A computer's QR from another network is refused by the app. */
+  refusedOnOtherNetwork?: boolean;
+  max: number;
+  typeMax: number;
+  inUse: number;
+  typeInUse: number;
+}
+
+/** An app's session limits and device sign-in settings (see the API reference). */
+export interface SessionSettings {
+  maxSessions: number;
+  perType: Partial<Record<DeviceType, number>>;
+  atLimit: "ask" | "replace" | "refuse";
+  replace: "least_recent" | "earliest";
+  deviceSignIn: boolean;
+  deviceCodeMinutes: number;
+  pairing: boolean;
+  pairingMinutes: number;
+  pairingLength: number;
+  wrongTries: number;
+  wrongWindowMinutes: number;
+  secondStep: boolean;
+  phoneSignIn: boolean;
+  phoneQrSeconds: number;
+  sharedIdleMinutes: number;
+  kioskQr: boolean;
+  kioskType: DeviceType;
+  orgDeviceLimit: number;
+  /** Number matching is on unless this is true. */
+  skipNumberMatch: boolean;
+  phonePlaceMismatch: "refuse" | "warn";
+  freshMinutes: number;
+  ownAppOnly: boolean;
+  skipNewDeviceEmail: boolean;
+  skipReplacedEmail: boolean;
+  pairingAppTries: number;
+  /** Idle sign-out per device type: -1 never (TVs by default), 0 the app's usual rule, or minutes. */
+  idleByType: Partial<Record<DeviceType, number>>;
+}
+
+/** An organization's stricter settings for one app (left out = the app's). */
+export type OrgSessionSettings = Partial<Pick<SessionSettings, "maxSessions" | "perType" | "atLimit" | "replace" | "deviceSignIn" | "deviceCodeMinutes" | "pairing" | "pairingMinutes" | "wrongTries" | "secondStep" | "phoneSignIn" | "sharedIdleMinutes" | "kioskQr" | "freshMinutes">> & {
+  /** Only `true` (stricter): number matching on for the organization's people. */
+  numberMatch?: boolean;
+  /** A shorter idle time per device type (minutes). */
+  idleByType?: Partial<Record<DeviceType, number>>;
+};
+
+export interface OrgSessionSettingsView {
+  appId: string;
+  appName: string;
+  app: SessionSettings;
+  override: OrgSessionSettings;
+  effective: SessionSettings;
 }
 
 /** A completed step-up: when, and with which second step. */
@@ -1305,6 +1544,7 @@ async function sha256(s: string): Promise<string> {
 export { qauthProxy, type ProxyOptions } from "./proxy.js";
 export { Verifier, bearerToken, errorResponse, identityOf, type VerifierOptions, type Identity, type ConnectMiddleware, type MiddlewareRequest, type MiddlewareResponse } from "./verify.js";
 export { TokenErrorCode, parseRetryAfter } from "./errors.js";
+export { startDeviceSignIn, pollDeviceToken, pairDevice, type DeviceSignIn, type DeviceSignInOptions, type DeviceTokens } from "./device.js";
 export { watchIdle, sessionIdOf, type IdleWatch, type IdleWatchOptions, type IdleSource, type IdleWarning, type SessionState, type SessionEnd } from "./idle.js";
 
 export default QAuth;

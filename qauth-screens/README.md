@@ -30,7 +30,7 @@ npm install @isdlc.ai/qauth @isdlc.ai/qauth-screens
 The package itself is also a public release of
 [github.com/ExaCall-LLC/qauth-js](https://github.com/ExaCall-LLC/qauth-js/releases) (MIT): tag
 `qauth-screens-vX.Y.Z`, file `isdlc.ai-qauth-screens-X.Y.Z.tgz`, e.g.
-`https://github.com/ExaCall-LLC/qauth-js/releases/download/qauth-screens-v0.6.1/isdlc.ai-qauth-screens-0.6.1.tgz`.
+`https://github.com/ExaCall-LLC/qauth-js/releases/download/qauth-screens-v0.9.0/isdlc.ai-qauth-screens-0.9.0.tgz`.
 
 ## 1. Your backend: mount the proxy
 
@@ -80,6 +80,16 @@ Change any text with `messages={{ "account.title": "Security" }}`.
 
 ## Changes
 
+- **0.9.0** (2026-11-25): `<MyDevices session={sid} />`: pass your ID token's sid so this device is marked and stays
+  signed in when signing out all TVs (without it, "Sign out all TVs" signs out every TV).
+- **0.8.0** (2026-11-25): `RecentActivity` (My account › Security › Recent activity: the person's own sign-ins,
+  refused attempts and security changes, from `GET /v1/me/activity`), part of `MyAccount`. English and Arabic.
+- **0.7.1** (2026-11-25): counted words read right ("1 device", Arabic singular, dual and plural forms).
+- **0.7.0** (2026-11-25): `<MyDevices />` (My account › Devices: every device with the counts against the app's
+  limits, rename, mark shared, sign out one or all TVs, Add a device with a pairing code) and
+  `<DeviceApproval code? clientId? />` (approve a TV's code from your app: the place first, the device's own name
+  labelled, a warning on another network with a confirmation, number matching; at the limit the person picks a device
+  to sign out). `ScreenError.data`. Needs a qAuth server with the 0.18 routes (`/v1/me/devices`).
 - **0.6.1** (2026-11-24): works with `@isdlc.ai/qauth` 0.9 up to any 0.x (was 0.9.x only on npm's 0.x rules),
   including 0.13. No code change.
 - **0.6.0** (2026-11-23): `MyAccount` gains "Personal access tokens" (also `<MyTokens />` alone): make a token from

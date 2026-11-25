@@ -15,6 +15,11 @@ export class QAuthError extends Error {
   readonly fields?: Record<string, string[]>;
   /** Seconds to wait before trying again (from Retry-After). */
   readonly retryAfter?: number;
+  /**
+   * What came with the refusal, when qAuth sends something (e.g. the
+   * sessions to choose from with a 409 `SESSION_LIMIT`).
+   */
+  data?: unknown;
   constructor(
     status: number,
     code: string,

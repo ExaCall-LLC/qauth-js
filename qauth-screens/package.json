@@ -1,6 +1,6 @@
 {
   "name": "@isdlc.ai/qauth-screens",
-  "version": "0.6.1",
+  "version": "0.9.0",
   "description": "Ready-made qAuth screens for your product: My account (password, authenticator, phone, recovery codes, sessions), organization people and invitations, roles, and company sign-in. They call your backend's qauthProxy (from @isdlc.ai/qauth); English and Arabic.",
   "type": "module",
   "license": "MIT",

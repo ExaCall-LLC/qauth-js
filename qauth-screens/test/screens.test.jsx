@@ -6,7 +6,7 @@ import { createInterface } from "node:readline";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { QAuthScreens, MyAccount, MyTokens, OrgMembers, OrgRoles, OrgCompanySignIn, OrgSubOrgs, OrgBranding, ConfirmAction, IdleWarning, createTransport } from "../dist/index.js";
+import { QAuthScreens, MyAccount, MyTokens, MyDevices, DeviceApproval, OrgMembers, OrgRoles, OrgCompanySignIn, OrgSubOrgs, OrgBranding, ConfirmAction, IdleWarning, createTransport } from "../dist/index.js";
 import { qauthProxy } from "@isdlc.ai/qauth";
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -34,16 +34,22 @@ describe("screens render", () => {
     const tr = fakeTransport({
       "/v1/me/security": { email: "lina@shop.test", hasPassword: true, companyManaged: false, authenticator: true, phone: "+966•••••5678", recoveryCodes: 7, offered: { authenticator: true, phone: true } },
       "/v1/me/sessions": [{ id: "s1", createdAt: "2026-11-15T10:00:00Z", lastUsed: "2026-11-15T11:00:00Z", device: "Lina's laptop" }],
+      "/v1/me/activity?limit=20": [
+        { id: 2, type: "signin.failed", result: "refused", ip: "203.0.113.9", userAgent: "Firefox", at: "2026-11-15T10:59:00Z" },
+        { id: 1, type: "signin.succeeded", result: "success", appName: "Omni", ip: "198.51.100.4", at: "2026-11-15T10:00:00Z" },
+      ],
     });
     const el = await render(<QAuthScreens transport={tr}><MyAccount /></QAuthScreens>);
     const text = el.textContent;
-    for (const s of ["lina@shop.test", "Change password", "Authenticator app", "+966•••••5678", "7 unused", "Lina's laptop", "Sign out everywhere"]) expect(text).toContain(s);
+    for (const s of ["lina@shop.test", "Change password", "Authenticator app", "+966•••••5678", "7 unused", "Lina's laptop", "Sign out everywhere",
+      "Recent activity", "Wrong password", "Refused", "203.0.113.9", "Signed in", "Omni"]) expect(text).toContain(s);
   });
 
   it("company-managed accounts get no password section; Arabic is right-to-left", async () => {
     const tr = fakeTransport({
       "/v1/me/security": { email: "e@corp.test", hasPassword: false, companyManaged: true, authenticator: false, recoveryCodes: 0, offered: { authenticator: false, phone: false } },
       "/v1/me/sessions": [],
+      "/v1/me/activity?limit=20": [],
     });
     const el = await render(<QAuthScreens transport={tr} locale="ar"><MyAccount /></QAuthScreens>);
     expect(el.querySelector('[dir="rtl"]')).not.toBeNull();
@@ -62,6 +68,58 @@ describe("screens render", () => {
     expect(el.textContent).toContain("new@shop.test");
     expect(el.textContent).not.toContain("done@shop.test");
     expect([...el.querySelectorAll("input")].some((i) => i.value === "https://engine.example/idps/callback")).toBe(true);
+  });
+
+  it("MyDevices lists devices with the counts, signs one out and makes a pairing code", async () => {
+    const list = {
+      devices: [
+        { id: "d1", name: "Office laptop", type: "computer", kind: "signin", shared: false, appId: "a1", appName: "Exa IPTV", place: "near 203.0.113.x", lastActiveAt: "2026-11-25T10:00:00Z", current: true },
+        { id: "d2", name: "Living room TV", type: "tv", kind: "code", shared: true, appId: "a1", appName: "Exa IPTV", place: "", lastActiveAt: "2026-11-25T09:00:00Z", current: false },
+      ],
+      appId: "a1",
+      counts: [{ type: "", inUse: 2, limit: 3 }, { type: "tv", inUse: 1, limit: 2 }, { type: "phone", inUse: 0, limit: 0 }],
+      apps: [{ id: "a1", name: "Exa IPTV", pairing: true }],
+    };
+    const tr = fakeTransport({ "/v1/me/devices?session=s-mine": list, "/v1/me/devices?app=a1&session=s-mine": list });
+    tr.send = async (m, p, b) => { tr.calls.push([m, p, b]); return p === "/v1/me/pairing-codes" ? { code: "7KQP4MZW", appName: "Exa IPTV", expiresAt: "2026-11-25T10:05:00Z", url: "https://exa.test/tv?pair=7KQP4MZW" } : {}; };
+    const el = await render(<QAuthScreens transport={tr}><MyDevices session="s-mine" /></QAuthScreens>);
+    for (const s of ["Office laptop", "This device", "Living room TV", "Shared", "All devices 2 of 3", "TVs 1 of 2"]) expect(el.textContent).toContain(s);
+    expect(el.textContent).not.toContain("Phones 0");
+    await act(async () => [...el.querySelectorAll("button")].filter((b) => b.textContent === "Sign out")[1].click());
+    expect(tr.calls.some((c) => c[0] === "DELETE" && c[1] === "/v1/me/devices/d2")).toBe(true);
+    await act(async () => button(el, "Sign out all TVs").click());
+    expect(tr.calls.some((c) => c[0] === "DELETE" && c[1] === "/v1/me/devices?type=tv&session=s-mine")).toBe(true);
+    await act(async () => button(el, "Add a device").click());
+    await act(async () => { await new Promise((r) => setTimeout(r, 20)); });
+    expect(tr.calls.find((c) => c[1] === "/v1/me/pairing-codes")[2]).toEqual({ appId: "a1" });
+    expect(el.textContent).toContain("7KQP 4MZW");
+  });
+
+  it("DeviceApproval shows the device before approving, and the sessions to pick at the limit", async () => {
+    const tr = fakeTransport({ "/v1/me/device-approvals/BKRT-JMXL": { userCode: "BKRT-JMXL", deviceName: "Living room TV", deviceType: "tv", appName: "Exa IPTV", place: "near 203.0.113.x", askedAt: "2026-11-25T10:00:00Z", secondStep: false, max: 3, typeMax: 2, inUse: 3, typeInUse: 2, choices: [12, 47, 83], otherNetwork: true, approverPlace: "near 198.51.100.x" } });
+    let n = 0;
+    tr.send = async (m, p, b) => {
+      tr.calls.push([m, p, b]);
+      if (n++ === 0) {
+        const { ScreenError } = await import("../dist/index.js");
+        throw new ScreenError(409, "SESSION_LIMIT", "You're signed in on the most devices this app allows", { sessions: [{ deviceId: "d9", name: "Bedroom TV", type: "tv", appName: "Exa IPTV", place: "" }] });
+      }
+      return { decision: "approve" };
+    };
+    const el = await render(<QAuthScreens transport={tr}><DeviceApproval code="BKRT-JMXL" /></QAuthScreens>);
+    await act(async () => button(el, "Continue").click());
+    await act(async () => { await new Promise((r) => setTimeout(r, 20)); });
+    expect(el.textContent).toContain("against your limit of 2 devices of this type");
+    for (const s of ["Approve a new device for Exa IPTV?", "The device is near 203.0.113.x.", "It calls itself “Living room TV”", "another network than you (near 198.51.100.x)", "Only approve if you are in front of this device"]) expect(el.textContent).toContain(s);
+    expect(button(el, "Approve").disabled).toBe(true); // no number picked, place not confirmed
+    await act(async () => button(el, "47").click());
+    await act(async () => el.querySelector('[role="checkbox"]').click());
+    await act(async () => button(el, "Approve").click());
+    expect(el.textContent).toContain("Bedroom TV");
+    await act(async () => [...el.querySelectorAll('[role="checkbox"]')].find((c) => c.getAttribute("aria-label") === "Bedroom TV").click());
+    await act(async () => button(el, "Approve").click());
+    expect(tr.calls.at(-1)[2]).toEqual({ decision: "approve", signOut: ["d9"], number: 47, confirmPlace: true });
+    expect(el.textContent).toContain("Approved");
   });
 
   it("MyTokens makes a personal token from the person's own permissions, a group ticking all of them", async () => {

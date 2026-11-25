@@ -18,7 +18,7 @@ One runtime dependency: [`jose`](https://github.com/panva/jose) for token signat
 Public, no account or token needed:
 
 ```bash
-npm install https://github.com/ExaCall-LLC/qauth-js/releases/download/qauth-v0.16.0/isdlc.ai-qauth-0.16.0.tgz
+npm install https://github.com/ExaCall-LLC/qauth-js/releases/download/qauth-v0.21.0/isdlc.ai-qauth-0.21.0.tgz
 ```
 
 Every version is a release of [github.com/ExaCall-LLC/qauth-js](https://github.com/ExaCall-LLC/qauth-js/releases)
@@ -374,6 +374,24 @@ A "this device" marker in the session list (tokens don't name their session).
 
 ## Changes
 
+- **0.21.0** (2026-11-25): `devices.list` marks `current` only for the `session` you pass (no guessing);
+  `devices.signOutAll` takes `session` and answers 400 unless your device is named (`session`/`keep`) or `includeCurrent`.
+- **0.20.0** (2026-11-25): the audit log. `AuditEntry` gains its own id (`uid`), who (`actorType`, `actorDisplay`, `actingOrgId`), what
+  (`targetType`, `targetName`, `changes` before/after), the result (`result`, `reason`), where (`ip`, `userAgent`,
+  `requestId`) and its place in the chain (`seq`, `hash`); `org.audit()` takes the audit log's filters (`AuditQuery`:
+  `type`, `group`, `actor`, `target`, `result`, `app`, `ip`, `request`, `from`, `to`); `account.activity()` reads the
+  person's own recent activity. Additions only.
+- **0.19.0** (2026-11-25): `me.account.devices.signOutAll` keeps the calling device unless `includeCurrent`; `list`
+  marks `current` from `session` (your ID token's sid), else your token's client's most recently active session.
+  `SessionSettings.idleByType` and `OrgSessionSettings.idleByType` (idle per device type; TVs never idle by default).
+- **0.18.0** (2026-11-25): sessions and devices. `me.account.devices`: `list({ app })` (every device with the counts
+  against the app's limits; `current` marks this one), `update(id, { name, shared })`, `signOut(id)`,
+  `signOutAll({ type, app, keep })`, `pairingCode(appId, { clientId })` (Add a device; needs a recent sign-in),
+  `lookup(code)` (place, `choices` for number matching, `otherNetwork`) and `approve(code, { number, confirmPlace,
+  signOut, clientId })` / `deny(code)` (409 `CONFIRM_PLACE`, 409 `SESSION_LIMIT` with the sessions in `error.data`,
+  403 `FRESH_SIGN_IN_REQUIRED`).
+  `org.members.devices / endDevice / endDevices` (admins), `org.sessionSettings.get / set` (stricter only).
+  Device side: `startDeviceSignIn` (with `matchNumber` to show), `pollDeviceToken`, `pairDevice`. `QAuthError.data`.
 - **0.17.0** (2026-11-25): child organizations. `org.subOrgs.list()` and
   `org.subOrgs.create({ name, adminEmail, levels, isolatedDirectory, levelId, invite })`: the first admin may be
   anyone, you too (an existing account is added as it is; a new one is emailed, no password comes back).

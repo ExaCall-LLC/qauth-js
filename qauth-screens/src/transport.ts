@@ -6,11 +6,14 @@
 export class ScreenError extends Error {
   readonly status: number;
   readonly code: string;
-  constructor(status: number, code: string, message: string) {
+  /** What came with the refusal (e.g. the sessions to choose from at a SESSION_LIMIT). */
+  readonly data?: unknown;
+  constructor(status: number, code: string, message: string, data?: unknown) {
     super(message);
     this.name = "ScreenError";
     this.status = status;
     this.code = code;
+    this.data = data;
   }
 }
 
@@ -33,7 +36,7 @@ export function createTransport(basePath = "/qauth", f: typeof fetch = (...a) =>
       throw new ScreenError(res.status, "BAD_RESPONSE", `HTTP ${res.status}`);
     }
     if (!res.ok || env.success === false) {
-      throw new ScreenError(res.status, env.error?.code ?? "ERROR", env.error?.message ?? `HTTP ${res.status}`);
+      throw new ScreenError(res.status, env.error?.code ?? "ERROR", env.error?.message ?? `HTTP ${res.status}`, env.data ?? undefined);
     }
     return env.data as T;
   }

@@ -4,6 +4,7 @@ import { Alert, Badge, Button, FormField, Table, TextInput, type UiColumn } from
 import { useScreens } from "./context.js";
 import { Note, ProofDialog, Section, useLoad, type Msg } from "./shared.js";
 import { MyTokens } from "./Tokens.js";
+import { RecentActivity } from "./Activity.js";
 
 interface Security {
   email: string;
@@ -40,6 +41,7 @@ export function MyAccount() {
       {s.passkeys && s.passkeys.length ? <PasskeysSection keys={s.passkeys} reload={sec.reload} /> : null}
       {s.authenticator || s.phone ? <RecoverySection left={s.recoveryCodes} reload={sec.reload} /> : null}
       <SessionsSection />
+      <RecentActivity />
       <MyTokens />
     </div>
   );
