@@ -51,18 +51,24 @@ export interface MyOrg {
   role: Role;
   /** The parent organization (absent: a top organization). */
   parentOrgId?: string;
-  /** The organization's tenant level name, if it has one. */
+  /** Its level name when it is the same in every API it has levels in (each API has its own list: read `levels`). */
   levelName?: string;
-  /** Your tenant's own organization. */
-  isInternal: boolean;
   /**
-   * Its levels in each API (API id -> levels, top first): your tenant's
-   * level names. Empty: no levels (everything works as without levels).
+   * The organization's own stored flag only: set by your tenant's admins.
+   * An organization internal only through a level has `internalByLevel`
+   * true instead; for "internal for any reason" check both.
+   */
+  isInternal: boolean;
+  /** One of its levels in some API is internal (derived; see `isInternal`). */
+  internalByLevel?: boolean;
+  /**
+   * Its levels in each API (API id -> that API's own levels, top first).
+   * Empty: no levels (everything works as without levels).
    */
   levels: Record<string, LevelRef[]>;
 }
 
-/** One level of your tenant (Operator, Provider, Customer…). */
+/** One level of an API's own list (Operator, Provider, Customer…). */
 export interface LevelRef {
   id: string;
   name: string;
@@ -103,11 +109,14 @@ export interface Org {
   externalId?: string;
   /** The parent organization (absent: a top organization). */
   parentOrgId?: string;
-  /** Its single level label, if it has one. */
+  /** @deprecated Always empty: levels are per API (`org.levels()`). */
   levelId?: string;
+  /** Its level name when it is the same in every API it has levels in. */
   levelName?: string;
-  /** Your tenant's own organization. */
+  /** The organization's own stored flag only (set by your tenant's admins); internal through a level shows `internalByLevel`: check both for "internal for any reason". */
   isInternal?: boolean;
+  /** One of its levels in some API is internal (derived, in lists). */
+  internalByLevel?: boolean;
   createdAt: string;
 }
 
@@ -121,8 +130,8 @@ export interface NewSubOrg {
    */
   adminEmail: string;
   /**
-   * Levels per API (API id -> level ids), each directly below one of the
-   * parent's levels there. Left out: in each API, the level directly below
+   * Levels per API (API id -> ids of that API's own levels), each directly
+   * below one of the parent's levels there. Left out: in each API, the level directly below
    * the parent's lowest level that has one below it.
    */
   levels?: Record<string, string[]>;
@@ -130,7 +139,7 @@ export interface NewSubOrg {
   isolatedDirectory?: boolean;
   /** Your own id for it (optional): unique in your tenant, at most 200 characters. */
   externalId?: string;
-  /** Its single level label (optional). */
+  /** @deprecated The old single level: refused when set. Give `levels`. */
   levelId?: string;
   /**
    * Email the first admin (a new account's one-time password goes in the

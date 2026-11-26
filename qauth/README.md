@@ -381,6 +381,7 @@ A "this device" marker in the session list (tokens don't name their session).
 
 ## Changes
 
+- **0.26.1** (2026-11-26): each API has its own list of levels: `LevelRef` and `levels` name that API's levels; `Org.levelId` is always empty (deprecated) and `NewSubOrg.levelId` is refused when set (give `levels`); `levelName` is the organization's level name when it is the same in every API. `MyOrg.internalByLevel` says one of its levels is internal (`isInternal` stays its own flag).
 - **0.26.0** (2026-11-26): "confirm it's you", one rule for every change to second steps: `authenticator.start(proof)`
   and `phone.add(phone, proof)` take a proof now; a person with an authenticator app confirms with their password and a
   code (`{ password, code }`), others with their password. A missing part is a 403 `CONFIRM_NEEDED`. Needs a qAuth

@@ -1,6 +1,6 @@
 {
   "name": "@isdlc.ai/qauth",
-  "version": "0.26.0",
+  "version": "0.26.1",
   "description": "Server-side SDK for products that use qAuth: verify access tokens offline, protect routes (middleware), check permissions with a cache, act as the signed-in person (their organizations, members, roles, domains, API keys, audit) and validate API keys.",
   "type": "module",
   "license": "MIT",
