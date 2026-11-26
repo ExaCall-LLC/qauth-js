@@ -128,6 +128,8 @@ export interface NewSubOrg {
   levels?: Record<string, string[]>;
   /** Its own new account pool (white label); otherwise the parent's. */
   isolatedDirectory?: boolean;
+  /** Your own id for it (optional): unique in your tenant, at most 200 characters. */
+  externalId?: string;
   /** Its single level label (optional). */
   levelId?: string;
   /**
@@ -698,8 +700,8 @@ class Transport {
     private readonly auth: Record<string, string>,
   ) {}
 
-  async call<T>(method: string, path: string, body?: unknown, query?: Query): Promise<T> {
-    return (await this.raw(method, path, body, query)).data as T;
+  async call<T>(method: string, path: string, body?: unknown, query?: Query, extra?: Record<string, string>): Promise<T> {
+    return (await this.raw(method, path, body, query, extra)).data as T;
   }
 
   async list<T>(path: string, query?: Query): Promise<Page<T>> {
@@ -709,7 +711,7 @@ class Transport {
     return { items: (env.data as T[]) ?? [], pagination };
   }
 
-  private async raw(method: string, path: string, body?: unknown, query?: Query): Promise<Record<string, unknown>> {
+  private async raw(method: string, path: string, body?: unknown, query?: Query, extra?: Record<string, string>): Promise<Record<string, unknown>> {
     // an empty, "." or ".." segment would reach another route: refuse before sending
     if (path.split("?")[0].split("/").slice(1).some((p) => p === "" || p === "." || p === "..")) {
       throw new QAuthError(400, "VALIDATION_ERROR", "An id in the request is empty or not allowed.");
@@ -718,7 +720,7 @@ class Transport {
     for (const [k, v] of Object.entries(query ?? {})) {
       if (v !== undefined && v !== "") url.searchParams.set(k, String(v));
     }
-    const headers: Record<string, string> = { accept: "application/json", ...this.auth };
+    const headers: Record<string, string> = { accept: "application/json", ...(extra ?? {}), ...this.auth };
     if (body !== undefined) headers["content-type"] = "application/json";
     let res: Response;
     try {
@@ -833,9 +835,43 @@ export class OrgClient {
    * children and their people (read-only); it never manages their people.
    */
   readonly subOrgs = {
+    /** Each child carries `createdAt`. */
     list: (): Promise<Page<Org>> => this.t.list(this.p("/suborgs")),
-    create: (s: NewSubOrg): Promise<CreatedSubOrg> => this.t.call("POST", this.p("/suborgs"), s),
+    /**
+     * With `idempotencyKey` (one you make per creation, 1 to 255 printable
+     * characters) a retry is safe: the same key and request within qAuth's
+     * window (24 hours by default) answer the same child, never a second
+     * one; another request with that key is refused (409).
+     */
+    create: (s: NewSubOrg, opts: { idempotencyKey?: string } = {}): Promise<CreatedSubOrg> =>
+      this.t.call("POST", this.p("/suborgs"), s, undefined, opts.idempotencyKey ? { "idempotency-key": opts.idempotencyKey } : undefined),
   };
+
+  /**
+   * Rename the organization: a direct child from its parent (with
+   * org.suborgs.manage, or the parent's key with qauth:org:suborgs), or the
+   * organization by its own admins. Unique among its siblings.
+   */
+  rename(name: string): Promise<Org> {
+    return this.t.call("PUT", this.p(), { name });
+  }
+  /**
+   * Set your own id for a direct child (`""` clears it): its parent (org.suborgs.manage
+   * in a role of the parent, or the parent's key with qauth:org:suborgs) or your
+   * tenant; never the organization's own people. Unique in your tenant.
+   */
+  setExternalId(externalId: string): Promise<Org> {
+    return this.t.call("PUT", this.p("/external-id"), { externalId });
+  }
+  /**
+   * Set a direct child's levels in one API, from its parent: the same rule as
+   * creating it (each level directly below one of the parent's). Refused when
+   * a child of the child, or someone holding a role of a level taken away,
+   * would be left without it (409), and for the child's last level (403).
+   */
+  setLevels(apiId: string, levelIds: string[]): Promise<OrgLevels> {
+    return this.t.call("PUT", this.p(`/levels/${seg(apiId)}`), { levelIds });
+  }
 
   /**
    * Sessions & devices for one app, made stricter for this organization's

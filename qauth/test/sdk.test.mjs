@@ -277,6 +277,25 @@ test("child organizations: list, create (any first admin; a new one is emailed, 
   assert.equal(viaKey.initialAdminPassword, undefined);
 });
 
+test("a key for child organizations only: create (externalId, Idempotency-Key), rename, external id, levels; never people", async () => {
+  const kids = qauth().withKey(seed.subOrgsKey).org(seed.shop).subOrgs;
+  const spec = { name: "Branch Idem TS", adminEmail: "boss@branch-idem-ts.test", externalId: "ts-idem-1" };
+  const first = await kids.create(spec, { idempotencyKey: "ts-create-1" });
+  assert.equal(first.org.externalId, "ts-idem-1");
+  assert.ok(first.org.createdAt);
+  const again = await kids.create(spec, { idempotencyKey: "ts-create-1" });
+  assert.deepEqual(again, first, "a retry with the key answers the same child");
+  await assert.rejects(kids.create({ ...spec, name: "Another" }, { idempotencyKey: "ts-create-1" }), (e) => e.status === 409);
+  const child = qauth().withKey(seed.subOrgsKey).org(first.org.id);
+  assert.equal((await child.rename("Branch Idem TS Ltd")).name, "Branch Idem TS Ltd");
+  assert.equal((await child.setExternalId("")).externalId, undefined);
+  // Shop has no levels: its child can't get one from it
+  await assert.rejects(child.setLevels(seed.api, [seed.customerLevel]), (e) => e.status === 422);
+  const list = await kids.list();
+  assert.ok(list.items.every((k) => typeof k.createdAt === "string" && !k.createdAt.startsWith("0001")));
+  await assert.rejects(qauth().withKey(seed.subOrgsKey).org(seed.shop).members.list(), (e) => e.status === 403);
+});
+
 test("roles carry their level", async () => {
   const org = qauth().as("cafe-admin-token").org(seed.cafe);
   const r = await org.roles.create(seed.app, { name: "Customer helper", permissions: [], levelId: seed.customerLevel });

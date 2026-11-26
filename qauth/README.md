@@ -18,7 +18,7 @@ One runtime dependency: [`jose`](https://github.com/panva/jose) for token signat
 Public, no account or token needed:
 
 ```bash
-npm install https://github.com/ExaCall-LLC/qauth-js/releases/download/qauth-v0.21.0/isdlc.ai-qauth-0.21.0.tgz
+npm install https://github.com/ExaCall-LLC/qauth-js/releases/download/qauth-v0.22.0/isdlc.ai-qauth-0.22.0.tgz
 ```
 
 Every version is a release of [github.com/ExaCall-LLC/qauth-js](https://github.com/ExaCall-LLC/qauth-js/releases)
@@ -374,6 +374,10 @@ A "this device" marker in the session list (tokens don't name their session).
 
 ## Changes
 
+- **0.22.0** (2026-11-26): child organizations from the parent. `subOrgs.create` takes `externalId` and
+  `{ idempotencyKey }` (a retry answers the same child; another request with the key is 409); `org(child).rename`,
+  `setExternalId` and `setLevels` (a direct child, from its parent: `org.suborgs.manage` / `org.suborgs.create`, or the
+  parent's key with the new scope `qauth:org:suborgs`).
 - **0.21.0** (2026-11-25): `devices.list` marks `current` only for the `session` you pass (no guessing);
   `devices.signOutAll` takes `session` and answers 400 unless your device is named (`session`/`keep`) or `includeCurrent`.
 - **0.20.0** (2026-11-25): the audit log. `AuditEntry` gains its own id (`uid`), who (`actorType`, `actorDisplay`, `actingOrgId`), what
