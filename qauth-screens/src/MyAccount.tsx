@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import QRCode from "qrcode";
-import { Alert, Badge, Button, FormField, Table, TextInput, type UiColumn } from "@isdlc.ai/ui";
+import { Alert, Badge, Button, Dialog, FormField, Table, TextInput, type UiColumn } from "@isdlc.ai/ui";
 import { useScreens } from "./context.js";
 import { Note, ProofDialog, Section, useLoad, type Msg } from "./shared.js";
 import { MyTokens } from "./Tokens.js";
@@ -24,25 +24,48 @@ interface Session {
   ip?: string;
 }
 
+export interface MyAccountProps {
+  /** The title above the page (default "My account"); null for none. */
+  title?: string | null;
+  /** "Where you're signed in" (the sign-in sessions, with Sign out everywhere). Default true. */
+  sessions?: boolean;
+  /** Recent activity. Default true. */
+  activity?: boolean;
+  /** Personal access tokens. Default true. */
+  tokens?: boolean;
+  /**
+   * Shows "Add a passkey": your app starts a fresh sign-in (passkeys are
+   * made on the sign-in pages, after the second step). Without it, new
+   * passkeys are only offered at sign-in.
+   */
+  onAddPasskey?: () => void;
+  /** Shown right under the title (e.g. the devices list, a profile card). */
+  children?: ReactNode;
+}
+
 /** The signed-in person's account: password, second steps, recovery codes, sessions. */
-export function MyAccount() {
+export function MyAccount({ title, sessions = true, activity = true, tokens = true, onAddPasskey, children }: MyAccountProps = {}) {
   const { t } = useScreens();
   const sec = useLoad<Security>("/v1/me/security");
   if (sec.loading && !sec.data) return <p>{t("common.loading")}</p>;
   if (sec.error || !sec.data) return <Alert tone="danger">{sec.error}</Alert>;
   const s = sec.data;
+  const heading = title === undefined ? t("account.title") : title;
   return (
     <div style={{ display: "grid", gap: 16 }}>
-      <h2 style={{ margin: 0 }}>{t("account.title")}</h2>
+      {heading ? <h2 style={{ margin: 0 }}>{heading}</h2> : null}
       <p style={{ margin: 0, opacity: 0.75 }}>{s.email}</p>
+      {children}
       {s.companyManaged ? <Alert tone="info">{t("account.company")}</Alert> : <PasswordSection />}
       {s.offered.authenticator || s.authenticator ? <AuthenticatorSection on={s.authenticator} reload={sec.reload} /> : null}
       {s.offered.phone || s.phone ? <PhoneSection phone={s.phone} reload={sec.reload} /> : null}
-      {s.passkeys && s.passkeys.length ? <PasskeysSection keys={s.passkeys} reload={sec.reload} /> : null}
+      {(s.passkeys && s.passkeys.length) || (onAddPasskey && !s.companyManaged) ? (
+        <PasskeysSection keys={s.passkeys ?? []} reload={sec.reload} onAdd={s.companyManaged ? undefined : onAddPasskey} />
+      ) : null}
       {s.authenticator || s.phone ? <RecoverySection left={s.recoveryCodes} reload={sec.reload} /> : null}
-      <SessionsSection />
-      <RecentActivity />
-      <MyTokens />
+      {sessions ? <SessionsSection /> : null}
+      {activity ? <RecentActivity /> : null}
+      {tokens ? <MyTokens /> : null}
     </div>
   );
 }
@@ -172,17 +195,44 @@ function PhoneSection({ phone, reload }: { phone?: string; reload: () => void })
   );
 }
 
-function PasskeysSection({ keys, reload }: { keys: { id: string; name: string }[]; reload: () => void }) {
+function PasskeysSection({ keys, reload, onAdd }: { keys: { id: string; name: string }[]; reload: () => void; onAdd?: () => void }) {
   const { t, api } = useScreens();
+  const [renaming, setRenaming] = useState<{ id: string; name: string } | null>(null);
+  const [name, setName] = useState("");
+  const [msg, setMsg] = useState<Msg>(null);
+  const rename = async () => {
+    const k = renaming;
+    setRenaming(null);
+    if (!k) return;
+    try {
+      await api.send("PUT", `/v1/me/passkeys/${encodeURIComponent(k.id)}`, { name });
+      setMsg({ tone: "success", text: t("account.passkeyRenamed") });
+      reload();
+    } catch (e) {
+      setMsg({ tone: "danger", text: (e as Error).message });
+    }
+  };
   return (
-    <Section title={t("account.passkeys")} hint={t("account.passkeysHint")}>
+    <Section title={t("account.passkeys")} hint={t(onAdd ? "account.passkeysAddHint" : "account.passkeysHint")}>
+      <Note msg={msg} />
+      {keys.length === 0 ? <p style={{ margin: 0, fontSize: 14, opacity: 0.75 }}>{t("account.passkeysNone")}</p> : null}
+      {onAdd ? <div><Button size="sm" onClick={onAdd}>{t("account.passkeyAdd")}</Button></div> : null}
       {keys.map((k) => (
         <div key={k.id} style={{ display: "flex", gap: 8, alignItems: "center", justifyContent: "space-between" }}>
           <span>{k.name || t("account.passkeys")}</span>
-          <ProofDialog trigger={<Button size="sm" variant="ghost">{t("common.remove")}</Button>}
-            onProof={async (p) => { await api.send("DELETE", `/v1/me/passkeys/${encodeURIComponent(k.id)}`, p); reload(); }} />
+          <span style={{ display: "inline-flex", gap: 4 }}>
+            <Button size="sm" variant="ghost" onClick={() => (setRenaming(k), setName(k.name))}>{t("account.passkeyRename")}</Button>
+            <ProofDialog trigger={<Button size="sm" variant="ghost">{t("common.remove")}</Button>}
+              onProof={async (p) => { await api.send("DELETE", `/v1/me/passkeys/${encodeURIComponent(k.id)}`, p); reload(); }} />
+          </span>
         </div>
       ))}
+      <Dialog open={!!renaming} onOpenChange={(o) => !o && setRenaming(null)} title={t("account.passkeyRename")}
+        footer={<Button variant="primary" onClick={() => void rename()} disabled={!name.trim()}>{t("common.save")}</Button>}>
+        <FormField label={t("account.passkeyName")}>
+          <TextInput value={name} maxLength={60} onChange={(e) => setName(e.target.value)} />
+        </FormField>
+      </Dialog>
     </Section>
   );
 }

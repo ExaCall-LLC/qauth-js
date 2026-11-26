@@ -126,6 +126,10 @@ export function MyDevices({ app, session }: { app?: string; session?: string }) 
     },
   ];
   const pairApps = (data?.apps ?? []).filter((a) => a.pairing);
+  // this device is known (the session you passed, or the one qAuth knows
+  // for its own apps): the others can be signed out, this one stays
+  const here = (data?.devices ?? []).find((d) => d.current);
+  const others = (data?.devices ?? []).filter((d) => !d.current).length;
   const counts = (data?.counts ?? []).filter((c) => c.type === "" || c.limit > 0 || c.inUse > 0);
   const tvs = (data?.devices ?? []).filter((d) => d.type === "tv").length;
   return (
@@ -152,6 +156,19 @@ export function MyDevices({ app, session }: { app?: string; session?: string }) 
             }
           >
             {t("devices.signOutTvs")}
+          </Button>
+        ) : null}
+        {here && others > 0 ? (
+          <Button
+            variant="ghost"
+            onClick={() =>
+              run(async () => {
+                const r = await api.send<{ count: number }>("DELETE", `/v1/me/devices${session ? `?session=${encodeURIComponent(session)}` : ""}`);
+                setMsg({ tone: "success", text: t("devices.signedOutOthers", { n: r.count }) });
+              })
+            }
+          >
+            {t("devices.signOutOthers")}
           </Button>
         ) : null}
         {pairApps.length ? (

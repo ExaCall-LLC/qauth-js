@@ -4,7 +4,7 @@ const en = {
   "devices.type.tv": "TV", "devices.type.phone": "Phone", "devices.type.computer": "Computer", "devices.type.other": "Other",
   "devices.types.tv": "TVs", "devices.types.phone": "Phones", "devices.types.computer": "Computers", "devices.types.other": "Other devices", "devices.all": "All devices",
   "devices.countOf": "{what} {n} of {max}", "devices.count": "{what} {n}",
-  "devices.rename": "Rename", "devices.markShared": "Shared device (signs out sooner when idle)", "devices.signOutTvs": "Sign out all TVs",
+  "devices.rename": "Rename", "devices.markShared": "Shared device (signs out sooner when idle)", "devices.signOutTvs": "Sign out all TVs", "devices.signOutOthers": "Sign out all other devices", "devices.signedOutOthers": "Signed out of {n} other devices.",
   "devices.add": "Add a device", "devices.addTitle": "Pairing code for {app}",
   "devices.addHint": "On the device's sign-in screen choose \"Enter a pairing code\" and type this code. It works once. Never read it out or send it to anyone.", "devices.addValid": "Valid until {time}.",
   "approve.title": "Sign in on a TV or another device", "approve.hint": "Enter the code the device shows.", "approve.code": "Code", "approve.asked": "Asked",
@@ -31,7 +31,7 @@ const en = {
   "account.authKey": "Key", "account.authCode": "Code from the app", "account.authDone": "The authenticator app is set up.",
   "account.phone": "Phone (SMS or call)", "account.phoneAdd": "Add a phone", "account.phoneNumber": "Mobile number",
   "account.phoneSent": "We sent a code to {phone}.", "account.phoneCode": "Code", "account.phoneDone": "Your phone was added.",
-  "account.passkeys": "Passkeys", "account.passkeysHint": "Sign in with your face, fingerprint or device PIN. New ones are offered on the sign-in page.",
+  "account.passkeys": "Passkeys", "account.passkeysHint": "Sign in with your face, fingerprint or device PIN. New ones are offered on the sign-in page.", "account.passkeyAdd": "Add a passkey", "account.passkeysAddHint": "Sign in with your face, fingerprint or device PIN. Adding one asks you to sign in again, with your second step.", "account.passkeysNone": "No passkeys yet.", "account.passkeyRename": "Rename", "account.passkeyName": "Name", "account.passkeyRenamed": "The passkey was renamed.",
   "account.recovery": "Recovery codes", "account.recoveryLeft": "{n} unused", "account.recoveryNew": "Make new codes",
   "account.recoveryHint": "Keep these somewhere safe. Each works once, when your phone or authenticator app is lost. They are shown only now.",
   "account.recoveryNeedFactor": "Set up an authenticator app or a phone first.",
@@ -86,7 +86,7 @@ const en = {
   "activity.ev.steppedUp": "Confirmed it's you", "activity.ev.resetAsked": "Password reset asked for", "activity.ev.passwordChanged": "Password changed",
   "activity.ev.signedOut": "Signed out", "activity.ev.ended": "Session ended", "activity.ev.authenticatorOn": "Authenticator app set up",
   "activity.ev.authenticatorOff": "Authenticator app removed", "activity.ev.phoneOn": "Phone added", "activity.ev.phoneOff": "Phone removed",
-  "activity.ev.passkeyOn": "Passkey added", "activity.ev.passkeyOff": "Passkey removed", "activity.ev.recoveryCodes": "New recovery codes",
+  "activity.ev.passkeyOn": "Passkey added", "activity.ev.passkeyOff": "Passkey removed", "activity.ev.passkeyRenamed": "Passkey renamed", "activity.ev.recoveryCodes": "New recovery codes",
   "activity.ev.tokenOn": "Personal access token created", "activity.ev.tokenOff": "Personal access token revoked",
 };
 type Key = keyof typeof en;
@@ -96,7 +96,7 @@ const ar: Partial<Record<Key, string>> = {
   "devices.type.tv": "تلفاز", "devices.type.phone": "جوال", "devices.type.computer": "حاسوب", "devices.type.other": "آخر",
   "devices.types.tv": "أجهزة التلفاز", "devices.types.phone": "الجوالات", "devices.types.computer": "الحواسيب", "devices.types.other": "أجهزة أخرى", "devices.all": "كل الأجهزة",
   "devices.countOf": "{what} {n} من {max}", "devices.count": "{what} {n}",
-  "devices.rename": "إعادة التسمية", "devices.markShared": "جهاز مشترك (يُسجَّل الخروج منه أسرع عند الخمول)", "devices.signOutTvs": "تسجيل الخروج من كل أجهزة التلفاز",
+  "devices.rename": "إعادة التسمية", "devices.markShared": "جهاز مشترك (يُسجَّل الخروج منه أسرع عند الخمول)", "devices.signOutTvs": "تسجيل الخروج من كل أجهزة التلفاز", "devices.signOutOthers": "تسجيل الخروج من كل الأجهزة الأخرى", "devices.signedOutOthers": "سُجِّل الخروج من الأجهزة الأخرى ({n}).",
   "devices.add": "إضافة جهاز", "devices.addTitle": "رمز الإقران لـ {app}",
   "devices.addHint": "في شاشة تسجيل الدخول على الجهاز اختر «أدخل رمز الإقران» واكتب هذا الرمز. يعمل مرة واحدة.", "devices.addValid": "صالح حتى {time}.",
   "approve.title": "تسجيل الدخول على تلفاز أو جهاز آخر", "approve.hint": "أدخل الرمز الظاهر على الجهاز.", "approve.code": "الرمز", "approve.asked": "وقت الطلب",
@@ -123,7 +123,7 @@ const ar: Partial<Record<Key, string>> = {
   "account.authKey": "المفتاح", "account.authCode": "الرمز من التطبيق", "account.authDone": "تم إعداد تطبيق المصادقة.",
   "account.phone": "الهاتف (رسالة أو مكالمة)", "account.phoneAdd": "إضافة هاتف", "account.phoneNumber": "رقم الجوال",
   "account.phoneSent": "أرسلنا رمزًا إلى {phone}.", "account.phoneCode": "الرمز", "account.phoneDone": "تمت إضافة هاتفك.",
-  "account.passkeys": "مفاتيح المرور", "account.passkeysHint": "سجّل الدخول بوجهك أو بصمتك أو رمز جهازك. تُعرض مفاتيح جديدة في صفحة تسجيل الدخول.",
+  "account.passkeys": "مفاتيح المرور", "account.passkeysHint": "سجّل الدخول بوجهك أو بصمتك أو رمز جهازك. تُعرض مفاتيح جديدة في صفحة تسجيل الدخول.", "account.passkeyAdd": "إضافة مفتاح مرور", "account.passkeysAddHint": "سجّل الدخول بوجهك أو بصمتك أو رمز جهازك. إضافة مفتاح تطلب منك تسجيل الدخول من جديد مع خطوتك الثانية.", "account.passkeysNone": "لا توجد مفاتيح مرور بعد.", "account.passkeyRename": "إعادة التسمية", "account.passkeyName": "الاسم", "account.passkeyRenamed": "أُعيدت تسمية مفتاح المرور.",
   "account.recovery": "رموز الاسترداد", "account.recoveryLeft": "{n} غير مستخدمة", "account.recoveryNew": "إنشاء رموز جديدة",
   "account.recoveryHint": "احفظها في مكان آمن. يعمل كل رمز مرة واحدة إذا فقدت هاتفك أو تطبيق المصادقة. تظهر الآن فقط.",
   "account.recoveryNeedFactor": "أعدّ تطبيق مصادقة أو هاتفًا أولًا.",
@@ -178,7 +178,7 @@ const ar: Partial<Record<Key, string>> = {
   "activity.ev.steppedUp": "تأكيد الهوية", "activity.ev.resetAsked": "طلب إعادة تعيين كلمة المرور", "activity.ev.passwordChanged": "تغيير كلمة المرور",
   "activity.ev.signedOut": "تسجيل خروج", "activity.ev.ended": "انتهت الجلسة", "activity.ev.authenticatorOn": "إعداد تطبيق المصادقة",
   "activity.ev.authenticatorOff": "إزالة تطبيق المصادقة", "activity.ev.phoneOn": "إضافة هاتف", "activity.ev.phoneOff": "إزالة هاتف",
-  "activity.ev.passkeyOn": "إضافة مفتاح مرور", "activity.ev.passkeyOff": "إزالة مفتاح مرور", "activity.ev.recoveryCodes": "رموز استرداد جديدة",
+  "activity.ev.passkeyOn": "إضافة مفتاح مرور", "activity.ev.passkeyOff": "إزالة مفتاح مرور", "activity.ev.passkeyRenamed": "إعادة تسمية مفتاح مرور", "activity.ev.recoveryCodes": "رموز استرداد جديدة",
   "activity.ev.tokenOn": "إنشاء رمز وصول شخصي", "activity.ev.tokenOff": "إلغاء رمز وصول شخصي",
 };
 export type Locale = "en" | "ar";

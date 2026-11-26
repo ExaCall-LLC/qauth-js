@@ -114,6 +114,69 @@ describe("screens render", () => {
     expect(el.textContent).toContain("7KQP 4MZW");
   });
 
+  it("My account for an app's own staff: no sessions or tokens sections, Add a passkey, devices beside it", async () => {
+    const tr = fakeTransport({
+      "/v1/me/security": { email: "admin@tenant.test", hasPassword: true, companyManaged: false, authenticator: true, recoveryCodes: 0, passkeys: [], offered: { authenticator: true, phone: false } },
+      "/v1/me/devices": {
+        devices: [
+          { id: "d1", name: "Mac", type: "computer", kind: "signin", shared: false, appId: "", appName: "qAuth Console", place: "", lastActiveAt: "2026-11-26T10:00:00Z", current: true },
+          { id: "d2", name: "Windows", type: "computer", kind: "signin", shared: false, appId: "", appName: "qAuth Console", place: "", lastActiveAt: "2026-11-26T09:00:00Z", current: false },
+        ],
+        apps: [],
+      },
+    });
+    tr.send = async (m, p, b) => { tr.calls.push([m, p, b]); return p === "/v1/me/devices" ? { removed: true, count: 1 } : {}; };
+    let added = 0;
+    const el = await render(
+      <QAuthScreens transport={tr}>
+        <MyAccount sessions={false} tokens={false} activity={false} onAddPasskey={() => added++}>
+          <MyDevices />
+        </MyAccount>
+      </QAuthScreens>,
+    );
+    for (const s of ["admin@tenant.test", "Passkeys", "No passkeys yet.", "Add a passkey", "qAuth Console", "This device"]) expect(el.textContent).toContain(s);
+    for (const s of ["Sign out everywhere", "Personal access tokens", "Recent activity"]) expect(el.textContent).not.toContain(s);
+    expect(tr.calls.some((c) => c[1] === "/v1/me/sessions")).toBe(false);
+    await act(async () => button(el, "Add a passkey").click());
+    expect(added).toBe(1);
+    expect(el.textContent).toContain("No passkeys yet.");
+    // the others go, this device stays (no session named: the server knows it)
+    await act(async () => button(el, "Sign out all other devices").click());
+    await act(async () => { await new Promise((r) => setTimeout(r, 20)); });
+    expect(tr.calls.some((c) => c[0] === "DELETE" && c[1] === "/v1/me/devices")).toBe(true);
+    expect(tr.calls.some((c) => c[0] === "DELETE" && c[1].includes("includeCurrent"))).toBe(false);
+    expect(el.textContent).toContain("Signed out of 1 other devices.");
+  });
+
+  it("passkeys can be renamed", async () => {
+    const tr = fakeTransport({
+      "/v1/me/security": { email: "a@b.test", hasPassword: true, companyManaged: false, authenticator: true, recoveryCodes: 0, passkeys: [{ id: "pk/1", name: "Mac · 2026-11-26" }], offered: { authenticator: true, phone: false } },
+    });
+    const el = await render(<QAuthScreens transport={tr}><MyAccount sessions={false} tokens={false} activity={false} /></QAuthScreens>);
+    expect(el.textContent).toContain("Mac · 2026-11-26");
+    await act(async () => button(el, "Rename").click());
+    const input = [...document.querySelectorAll("input")].find((i) => i.value === "Mac · 2026-11-26");
+    await act(async () => {
+      const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
+      set.call(input, "Work laptop");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    const dialog = input.closest('[role="dialog"]');
+    await act(async () => [...dialog.querySelectorAll("button")].find((b) => b.textContent === "Save").click());
+    await act(async () => { await new Promise((r) => setTimeout(r, 20)); });
+    expect(tr.calls.find((c) => c[0] === "PUT")).toEqual(["PUT", "/v1/me/passkeys/pk%2F1", { name: "Work laptop" }]);
+    expect(document.body.textContent).not.toContain("Work laptopSave"); // the dialog closed
+  });
+
+  it("MyDevices offers no 'sign out the others' when this device is not known", async () => {
+    const tr = fakeTransport({
+      "/v1/me/devices": { devices: [{ id: "d1", name: "Mac", type: "computer", kind: "signin", shared: false, appId: "a1", appName: "Shop", place: "", lastActiveAt: "2026-11-26T10:00:00Z", current: false }], apps: [] },
+    });
+    const el = await render(<QAuthScreens transport={tr}><MyDevices /></QAuthScreens>);
+    expect(el.textContent).toContain("Mac");
+    expect(el.textContent).not.toContain("Sign out all other devices");
+  });
+
   it("DeviceApproval shows the device before approving, and the sessions to pick at the limit", async () => {
     const tr = fakeTransport({ "/v1/me/device-approvals/BKRT-JMXL": { userCode: "BKRT-JMXL", deviceName: "Living room TV", deviceType: "tv", appName: "Exa IPTV", place: "near 203.0.113.x", askedAt: "2026-11-25T10:00:00Z", secondStep: false, max: 3, typeMax: 2, inUse: 3, typeInUse: 2, choices: [12, 47, 83], otherNetwork: true, approverPlace: "near 198.51.100.x" } });
     let n = 0;

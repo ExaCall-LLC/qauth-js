@@ -1,5 +1,5 @@
 export { QAuthScreens, useScreens, type QAuthScreensProps } from "./context.js";
-export { MyAccount } from "./MyAccount.js";
+export { MyAccount, type MyAccountProps } from "./MyAccount.js";
 export { RecentActivity } from "./Activity.js";
 export { OrgMembers, OrgRoles, OrgCompanySignIn, OrgSubOrgs, OrgBranding } from "./Org.js";
 export { ConfirmAction, type ConfirmActionProps } from "./ConfirmAction.js";

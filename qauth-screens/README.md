@@ -80,6 +80,12 @@ Change any text with `messages={{ "account.title": "Security" }}`.
 
 ## Changes
 
+- **0.10.0** (2026-11-26): `<MyAccount sessions={false} tokens={false} activity={false} onAddPasskey={…}>`: leave
+  sections out, put your own (e.g. `<MyDevices />`) under the title as children, and show "Add a passkey" (your app
+  starts a fresh sign-in; the passkey is made on the sign-in pages after the second step). `<MyDevices />` gets
+  "Sign out all other devices" when this device is known (it stays signed in). Passkeys can be renamed
+  (`PUT /v1/me/passkeys/{id}`; needs a qAuth server with that route). qAuth's own Console and Portal use
+  these screens for their people's My account. English and Arabic.
 - **0.9.1** (2026-11-26): `<OrgCompanySignIn>`: a "Public client (PKCE, no secret)" choice (no secret asked when ticked)
   and a warning listing the organization's apps in another directory, which company sign-in does not cover.
 - **0.9.0** (2026-11-25): `<MyDevices session={sid} />`: pass your ID token's sid so this device is marked and stays

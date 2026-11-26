@@ -36,6 +36,7 @@ const LABELS: Record<string, MessageKey> = {
   "me.phone.verify": "activity.ev.phoneOn",
   "me.phone.removed": "activity.ev.phoneOff",
   "me.passkeys.removed": "activity.ev.passkeyOff",
+  "me.passkeys.updated": "activity.ev.passkeyRenamed",
   "signin.passkey_added": "activity.ev.passkeyOn",
   "me.recovery-codes": "activity.ev.recoveryCodes",
   "me.tokens.created": "activity.ev.tokenOn",
