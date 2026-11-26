@@ -70,6 +70,25 @@ describe("screens render", () => {
     expect([...el.querySelectorAll("input")].some((i) => i.value === "https://engine.example/idps/callback")).toBe(true);
   });
 
+  it("OrgCompanySignIn: public client hides the secret and is sent; apps in another directory are listed", async () => {
+    const tr = fakeTransport({
+      "/v1/orgs/o1/sso": { connected: false, callbackUrl: "https://engine.example/idps/callback",
+        otherDirectoryApps: [{ id: "a2", name: "Patients portal", directoryId: "d2", directoryName: "Patients" }] },
+    });
+    const el = await render(<QAuthScreens transport={tr}><OrgCompanySignIn orgId="o1" /></QAuthScreens>);
+    expect(el.textContent).toContain("Patients portal (Patients)");
+    expect(el.querySelector('input[type="password"]')).not.toBeNull();
+    const box = el.querySelector('[aria-label="Public client (PKCE, no secret)"]');
+    expect(box).not.toBeNull();
+    await act(async () => { box.click(); });
+    expect(el.querySelector('input[type="password"]')).toBeNull();
+    const save = [...el.querySelectorAll("button")].find((b) => b.textContent === "Save");
+    await act(async () => { save.click(); });
+    const put = tr.calls.find((c) => c[0] === "PUT");
+    expect(put[2].publicClient).toBe(true);
+    expect(put[2].clientSecret).toBe("");
+  });
+
   it("MyDevices lists devices with the counts, signs one out and makes a pairing code", async () => {
     const list = {
       devices: [

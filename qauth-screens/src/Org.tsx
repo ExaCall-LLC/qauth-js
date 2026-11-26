@@ -422,7 +422,9 @@ function NewRole({ base, appId, perms, orgPerms, onDone }: { base: string; appId
 interface SSOState {
   connected: boolean;
   callbackUrl: string;
-  connection?: { displayName: string; issuer: string; clientId: string; mode: "optional" | "required" };
+  connection?: { displayName: string; issuer: string; clientId: string; mode: "optional" | "required"; publicClient?: boolean };
+  /** Apps the organization can use that sign in from another directory: company sign-in does not cover them. */
+  otherDirectoryApps?: { id: string; name: string; directoryId: string; directoryName: string }[];
 }
 
 /** The organization's company sign-in (admins). */
@@ -431,9 +433,10 @@ export function OrgCompanySignIn({ orgId }: { orgId: string }) {
   const path = `/v1/orgs/${encodeURIComponent(orgId)}/sso`;
   const st = useLoad<SSOState>(path);
   const c = st.data?.connection;
-  const [form, setForm] = useState<{ displayName: string; issuer: string; clientId: string; clientSecret: string; mode: string } | null>(null);
-  const f = form ?? { displayName: c?.displayName ?? "", issuer: c?.issuer ?? "", clientId: c?.clientId ?? "", clientSecret: "", mode: c?.mode ?? "optional" };
-  const set = (k: keyof typeof f, v: string) => setForm({ ...f, [k]: v });
+  const [form, setForm] = useState<{ displayName: string; issuer: string; clientId: string; clientSecret: string; mode: string; publicClient: boolean } | null>(null);
+  const f = form ?? { displayName: c?.displayName ?? "", issuer: c?.issuer ?? "", clientId: c?.clientId ?? "", clientSecret: "", mode: c?.mode ?? "optional", publicClient: c?.publicClient === true };
+  const set = (k: keyof typeof f, v: string | boolean) => setForm({ ...f, [k]: v });
+  const otherApps = st.data?.otherDirectoryApps ?? [];
   const [msg, setMsg] = useState<Msg>(null);
   const save = async () => {
     try {
@@ -457,11 +460,21 @@ export function OrgCompanySignIn({ orgId }: { orgId: string }) {
   return (
     <Section title={t("sso.title")} hint={t("sso.hint")}>
       <Note msg={msg} />
+      {otherApps.length > 0 ? (
+        <Alert tone="warning">{t("sso.otherDirs", { apps: otherApps.map((a) => `${a.name} (${a.directoryName})`).join(", ") })}</Alert>
+      ) : null}
       <FormField label={t("sso.redirect")}><TextInput value={st.data?.callbackUrl ?? ""} readOnly dir="ltr" /></FormField>
       <FormField label={t("sso.displayName")} required><TextInput value={f.displayName} onChange={(e) => set("displayName", e.target.value)} /></FormField>
       <FormField label={t("sso.issuer")} required><TextInput value={f.issuer} onChange={(e) => set("issuer", e.target.value)} dir="ltr" placeholder="https://login.microsoftonline.com/<tenant id>/v2.0" /></FormField>
       <FormField label={t("sso.clientId")} required><TextInput value={f.clientId} onChange={(e) => set("clientId", e.target.value)} dir="ltr" /></FormField>
-      <FormField label={t("sso.clientSecret")} required={!st.data?.connected}><TextInput type="password" value={f.clientSecret} onChange={(e) => set("clientSecret", e.target.value)} placeholder={st.data?.connected ? t("sso.secretKept") : ""} autoComplete="new-password" /></FormField>
+      <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 14 }}>
+        <Checkbox checked={f.publicClient} onCheckedChange={(v) => setForm({ ...f, publicClient: v === true, clientSecret: v === true ? "" : f.clientSecret })} aria-label={t("sso.publicClient")} />
+        {t("sso.publicClient")}
+      </label>
+      <p style={{ fontSize: 13, opacity: 0.8, margin: 0 }}>{t("sso.publicClientHint")}</p>
+      {f.publicClient ? null : (
+        <FormField label={t("sso.clientSecret")} required={!st.data?.connected || c?.publicClient === true}><TextInput type="password" value={f.clientSecret} onChange={(e) => set("clientSecret", e.target.value)} placeholder={st.data?.connected && !c?.publicClient ? t("sso.secretKept") : ""} autoComplete="new-password" /></FormField>
+      )}
       <FormField label={t("sso.mode")}>
         <SegmentedControl value={f.mode} onValueChange={(v) => set("mode", v)} options={[{ value: "optional", label: t("sso.optional") }, { value: "required", label: t("sso.required") }]} />
       </FormField>

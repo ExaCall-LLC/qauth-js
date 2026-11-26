@@ -393,6 +393,8 @@ export interface SSOConnection {
   mode: "optional" | "required";
   /** The client secret is stored by qAuth's engine and never returned. */
   secretSet: boolean;
+  /** A public client (PKCE, no secret), e.g. another qAuth tenant's web client. */
+  publicClient?: boolean;
   callbackUrl: string;
   createdAt: string;
   updatedAt: string;
@@ -403,6 +405,16 @@ export interface SSOState {
   /** Register this redirect address at the company's provider. */
   callbackUrl: string;
   connection?: SSOConnection;
+  /** Apps the organization can use that sign in from another directory: company sign-in does not cover them. */
+  otherDirectoryApps?: SSOOtherApp[];
+}
+
+/** An app the organization can use whose people sign in from another directory. */
+export interface SSOOtherApp {
+  id: string;
+  name: string;
+  directoryId: string;
+  directoryName: string;
 }
 
 export interface SSOSpec {
@@ -411,8 +423,14 @@ export interface SSOSpec {
   /** e.g. https://login.microsoftonline.com/<tenant id>/v2.0 */
   issuer: string;
   clientId: string;
-  /** Required the first time; omit to keep the stored one. */
+  /** Required the first time (unless a public client); omit to keep the stored one. */
   clientSecret?: string;
+  /**
+   * A public client (PKCE, no secret). Also assumed when no secret is given
+   * to a qAuth issuer (its discovery serves qauth_api and takes token auth
+   * method "none"); never for another provider.
+   */
+  publicClient?: boolean;
   /** optional (default): a button; required: no password sign-in or reset. */
   mode?: "optional" | "required";
 }
@@ -422,6 +440,10 @@ export interface AddedDomain {
   domain: OrgDomain;
   /** The DNS name of the TXT record: _qauth-verify.<domain>. Its value is domain.token. */
   record: string;
+  /** The TXT record's name (same as record). */
+  txtName?: string;
+  /** The TXT record's value (same as domain.token). */
+  txtValue?: string;
 }
 
 export interface ApiKey {

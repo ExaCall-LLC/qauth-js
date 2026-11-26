@@ -18,7 +18,7 @@ One runtime dependency: [`jose`](https://github.com/panva/jose) for token signat
 Public, no account or token needed:
 
 ```bash
-npm install https://github.com/ExaCall-LLC/qauth-js/releases/download/qauth-v0.22.0/isdlc.ai-qauth-0.22.0.tgz
+npm install https://github.com/ExaCall-LLC/qauth-js/releases/download/qauth-v0.23.0/isdlc.ai-qauth-0.23.0.tgz
 ```
 
 Every version is a release of [github.com/ExaCall-LLC/qauth-js](https://github.com/ExaCall-LLC/qauth-js/releases)
@@ -374,6 +374,10 @@ A "this device" marker in the session list (tokens don't name their session).
 
 ## Changes
 
+- **0.23.0** (2026-11-26): company sign-in and domains. `SSOSpec.publicClient` (a client without a secret, PKCE, such
+  as another qAuth tenant's web client), `SSOConnection.publicClient`, `SSOState.otherDirectoryApps` (apps the
+  organization can use that sign in from another directory: company sign-in does not cover them), and
+  `AddedDomain.txtName` / `txtValue` (the TXT record to publish).
 - **0.22.0** (2026-11-26): child organizations from the parent. `subOrgs.create` takes `externalId` and
   `{ idempotencyKey }` (a retry answers the same child; another request with the key is 409); `org(child).rename`,
   `setExternalId` and `setLevels` (a direct child, from its parent: `org.suborgs.manage` / `org.suborgs.create`, or the

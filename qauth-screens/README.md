@@ -30,7 +30,7 @@ npm install @isdlc.ai/qauth @isdlc.ai/qauth-screens
 The package itself is also a public release of
 [github.com/ExaCall-LLC/qauth-js](https://github.com/ExaCall-LLC/qauth-js/releases) (MIT): tag
 `qauth-screens-vX.Y.Z`, file `isdlc.ai-qauth-screens-X.Y.Z.tgz`, e.g.
-`https://github.com/ExaCall-LLC/qauth-js/releases/download/qauth-screens-v0.9.0/isdlc.ai-qauth-screens-0.9.0.tgz`.
+`https://github.com/ExaCall-LLC/qauth-js/releases/download/qauth-screens-v0.9.1/isdlc.ai-qauth-screens-0.9.1.tgz`.
 
 ## 1. Your backend: mount the proxy
 
@@ -80,6 +80,8 @@ Change any text with `messages={{ "account.title": "Security" }}`.
 
 ## Changes
 
+- **0.9.1** (2026-11-26): `<OrgCompanySignIn>`: a "Public client (PKCE, no secret)" choice (no secret asked when ticked)
+  and a warning listing the organization's apps in another directory, which company sign-in does not cover.
 - **0.9.0** (2026-11-25): `<MyDevices session={sid} />`: pass your ID token's sid so this device is marked and stays
   signed in when signing out all TVs (without it, "Sign out all TVs" signs out every TV).
 - **0.8.0** (2026-11-25): `RecentActivity` (My account › Security › Recent activity: the person's own sign-ins,

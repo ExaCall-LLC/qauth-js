@@ -102,9 +102,11 @@ test("settings, security, apps", async () => {
 
 test("domains: add, list, verify (TXT missing), remove", async () => {
   const org = qauth().as("shop-admin-token").org(seed.shop);
-  const { domain: d, record } = await org.domains.add("shop.test");
+  const { domain: d, record, txtName, txtValue } = await org.domains.add("shop.test");
   assert.ok(d.token);
   assert.equal(record, "_qauth-verify.shop.test");
+  assert.equal(txtName, record);
+  assert.equal(txtValue, d.token);
   assert.equal((await org.domains.list()).items.length, 1);
   await assert.rejects(org.domains.verify(d.id), (e) => e instanceof QAuthError && e.status === 422);
   assert.deepEqual(await org.domains.remove(d.id), { removed: true });
@@ -308,7 +310,10 @@ test("company sign-in: not connected, needs a verified domain, admins only", asy
   const st = await org.sso.get();
   assert.equal(st.connected, false);
   assert.match(st.callbackUrl, /\/idps\/callback$/);
+  assert.ok(Array.isArray(st.otherDirectoryApps));
   await assert.rejects(org.sso.set({ displayName: "Shop account", issuer: "https://login.example.test", clientId: "c", clientSecret: "s" }),
+    (e) => e.status === 422 && /verify at least one email domain/i.test(e.message));
+  await assert.rejects(org.sso.set({ displayName: "Shop account", issuer: "https://login.example.test", clientId: "c", publicClient: true }),
     (e) => e.status === 422 && /verify at least one email domain/i.test(e.message));
   await assert.rejects(org.sso.remove(), (e) => e.status === 404);
   await assert.rejects(qauth().as("shop-member-token").org(seed.shop).sso.get(), (e) => e.status === 403);
