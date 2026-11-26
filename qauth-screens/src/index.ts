@@ -8,3 +8,5 @@ export { createTransport, ScreenError, type Transport } from "./transport.js";
 export { translator, type Locale, type MessageKey } from "./i18n.js";
 export { MyTokens } from "./Tokens.js";
 export { MyDevices, DeviceApproval } from "./Devices.js";
+export { useConfirm, type ConfirmNeeds, type Proof } from "./shared.js";
+export { createPasskey, answerPasskey, decodeOptions, encodeCredential } from "./webauthn.js";

@@ -326,15 +326,17 @@ test("my account: security, password, authenticator with proof, recovery codes, 
   assert.equal(sec.authenticator, false);
   await assert.rejects(me.account.changePassword("wrong", "Brand-new-pass-1!"), (e) => e.status === 422);
   assert.deepEqual(await me.account.changePassword("Pass-shop-admin-1!", "Brand-new-pass-1!"), { updated: true });
-  const start = await me.account.authenticator.start();
+  await assert.rejects(me.account.authenticator.start(), (e) => e.status === 403); // confirm it's you first
+  const start = await me.account.authenticator.start({ password: "Brand-new-pass-1!" });
   assert.match(start.uri, /^otpauth:/);
   await me.account.authenticator.verify("123456");
-  await assert.rejects(me.account.authenticator.remove({ password: "nope" }), (e) => e.status === 422);
-  const codes = await me.account.recoveryCodes();
+  await assert.rejects(me.account.authenticator.remove({ code: "123456" }), (e) => e.status === 403); // the password too
+  await assert.rejects(me.account.authenticator.remove({ password: "nope", code: "123456" }), (e) => e.status === 422);
+  await assert.rejects(me.account.recoveryCodes(), (e) => e.status === 403); // always confirmed, the first codes too
+  const codes = await me.account.recoveryCodes({ password: "Brand-new-pass-1!", code: "123456" });
   assert.equal(codes.codes.length, 10);
-  await assert.rejects(me.account.recoveryCodes(), (e) => e.status === 422); // proof needed now
-  assert.equal((await me.account.recoveryCodes({ code: "123456" })).codes.length, 10);
-  assert.deepEqual(await me.account.authenticator.remove({ code: "123456" }), { removed: true });
+  assert.equal((await me.account.recoveryCodes({ password: "Brand-new-pass-1!", code: "123456" })).codes.length, 10);
+  assert.deepEqual(await me.account.authenticator.remove({ password: "Brand-new-pass-1!", code: "123456" }), { removed: true });
   const s = await me.account.sessions.list();
   assert.equal(s.items.length, 2);
   await assert.rejects(me.account.sessions.end("sess-cafe-admin-1"), (e) => e.status === 404);

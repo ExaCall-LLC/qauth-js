@@ -6,7 +6,7 @@ import { createInterface } from "node:readline";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { QAuthScreens, MyAccount, MyTokens, MyDevices, DeviceApproval, OrgMembers, OrgRoles, OrgCompanySignIn, OrgSubOrgs, OrgBranding, ConfirmAction, IdleWarning, createTransport } from "../dist/index.js";
+import { QAuthScreens, MyAccount, MyTokens, MyDevices, DeviceApproval, OrgMembers, OrgRoles, OrgCompanySignIn, OrgSubOrgs, OrgBranding, ConfirmAction, IdleWarning, createTransport, ScreenError } from "../dist/index.js";
 import { qauthProxy } from "@isdlc.ai/qauth";
 
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -166,6 +166,112 @@ describe("screens render", () => {
     await act(async () => { await new Promise((r) => setTimeout(r, 20)); });
     expect(tr.calls.find((c) => c[0] === "PUT")).toEqual(["PUT", "/v1/me/passkeys/pk%2F1", { name: "Work laptop" }]);
     expect(document.body.textContent).not.toContain("Work laptopSave"); // the dialog closed
+  });
+
+  it("Add a passkey on the page: right after signing in, no confirm step; the browser makes it and it is saved", async () => {
+    const created = [];
+    globalThis.window.PublicKeyCredential = function () {};
+    Object.defineProperty(globalThis.navigator, "credentials", { configurable: true, value: {
+      create: async ({ publicKey }) => {
+        created.push(publicKey);
+        const b = (s) => new TextEncoder().encode(s).buffer;
+        return { id: "cred-1", rawId: b("cred-1"), type: "public-key", response: { clientDataJSON: b("{}"), attestationObject: b("att"), getTransports: () => ["internal"] }, getClientExtensionResults: () => ({}) };
+      },
+    } });
+    const tr = fakeTransport({
+      "/v1/me/security": { email: "admin@tenant.test", hasPassword: true, companyManaged: false, authenticator: false, recoveryCodes: 0, passkeys: [], passkeysHere: true, offered: { authenticator: true, phone: false } },
+    });
+    tr.send = async (m, p, b) => { tr.calls.push([m, p, b]); return p === "/v1/me/passkeys" ? { passkeyId: "pk-1", options: { publicKey: { challenge: "AAAA", user: { id: "AAAA", name: "a" }, authenticatorSelection: { residentKey: "required" } } } } : {}; };
+    const el = await render(<QAuthScreens transport={tr}><MyAccount sessions={false} tokens={false} activity={false} /></QAuthScreens>);
+    await act(async () => button(el, "Add a passkey").click());
+    await act(async () => { await new Promise((r) => setTimeout(r, 20)); });
+    expect(created.length).toBe(1);
+    expect(created[0].challenge instanceof ArrayBuffer).toBe(true);
+    const verify = tr.calls.find((c) => c[1] === "/v1/me/passkeys/pk-1/verify");
+    expect(verify[2].credential.id).toBe("cred-1");
+    expect(verify[2].credential.response.attestationObject).toBe("YXR0");
+    expect(el.textContent).toContain("From now on it is your second step");
+    expect(document.body.textContent).not.toContain("Confirm it's you");
+  });
+
+  it("Confirm it's you: asks only what the person has, keeps the page, then goes on", async () => {
+    const tr = fakeTransport({
+      "/v1/me/security": { email: "admin@tenant.test", hasPassword: true, companyManaged: false, authenticator: true, recoveryCodes: 3, passkeys: [], passkeysHere: true, offered: { authenticator: true, phone: false } },
+    });
+    let asked = 0;
+    tr.send = async (m, p, b) => {
+      tr.calls.push([m, p, b]);
+      if (p === "/v1/me/authenticator" && m === "DELETE" && !(b && b.password && b.code)) {
+        asked++;
+        throw new ScreenError(403, "CONFIRM_NEEDED", "Confirm it's you to make this change.", { email: "admin@tenant.test", password: true, code: true, passkey: false });
+      }
+      return {};
+    };
+    const el = await render(<QAuthScreens transport={tr}><MyAccount sessions={false} tokens={false} activity={false} /></QAuthScreens>);
+    const removeAuth = [...el.querySelectorAll("button")].find((b) => b.textContent === "Remove");
+    await act(async () => removeAuth.click());
+    await act(async () => { await new Promise((r) => setTimeout(r, 20)); });
+    const dialog = document.querySelector('[role="dialog"]');
+    expect(dialog.textContent).toContain("Confirm it's you");
+    const inputs = [...dialog.querySelectorAll("input")];
+    expect(inputs.find((i) => i.value === "admin@tenant.test").readOnly).toBe(true);
+    const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
+    await act(async () => {
+      const pw = inputs.find((i) => i.type === "password"); set.call(pw, "pw-1"); pw.dispatchEvent(new Event("input", { bubbles: true }));
+      const code = inputs.find((i) => i.inputMode === "numeric"); set.call(code, "123456"); code.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => [...dialog.querySelectorAll("button")].find((b) => b.textContent === "Continue").click());
+    await act(async () => { await new Promise((r) => setTimeout(r, 20)); });
+    expect(asked).toBe(1);
+    expect(tr.calls.filter((c) => c[1] === "/v1/me/authenticator").pop()[2]).toEqual({ password: "pw-1", code: "123456" });
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+  });
+
+  it("someone whose second step is their phone confirms with the password and a code by SMS", async () => {
+    const tr = fakeTransport({
+      "/v1/me/security": { email: "p@b.test", hasPassword: true, companyManaged: false, authenticator: false, phone: "+966•••••0001", recoveryCodes: 0, passkeys: [], offered: { authenticator: true, phone: true } },
+    });
+    tr.send = async (m, p, b) => {
+      tr.calls.push([m, p, b]);
+      if (p === "/v1/me/confirm/phone") return { codeSentTo: "+966•••••0001" };
+      if (p === "/v1/me/authenticator" && m === "POST" && !(b && b.password && b.phoneCode)) throw new ScreenError(403, "CONFIRM_NEEDED", "x", { email: "p@b.test", password: true, code: false, passkey: false, phone: "+966•••••0001" });
+      return { uri: "otpauth://totp/x?secret=A", secret: "A" };
+    };
+    const el = await render(<QAuthScreens transport={tr}><MyAccount sessions={false} tokens={false} activity={false} /></QAuthScreens>);
+    await act(async () => button(el, "Set up").click());
+    await act(async () => { await new Promise((r) => setTimeout(r, 20)); });
+    const dialog = () => document.querySelector('[role="dialog"]');
+    await act(async () => [...dialog().querySelectorAll("button")].find((b) => b.textContent.startsWith("Text a code")).click());
+    await act(async () => { await new Promise((r) => setTimeout(r, 20)); });
+    const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
+    await act(async () => {
+      const inputs = [...dialog().querySelectorAll("input")];
+      const pw = inputs.find((i) => i.type === "password"); set.call(pw, "pw"); pw.dispatchEvent(new Event("input", { bubbles: true }));
+      const sms = inputs.find((i) => i.inputMode === "numeric"); set.call(sms, "4821"); sms.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => [...dialog().querySelectorAll("button")].find((b) => b.textContent === "Continue").click());
+    await act(async () => { await new Promise((r) => setTimeout(r, 20)); });
+    expect(tr.calls.filter((c) => c[1] === "/v1/me/authenticator").pop()[2]).toEqual({ password: "pw", phoneCode: "4821" });
+    expect(dialog()).toBeNull();
+  });
+
+  it("someone whose second step is a passkey confirms with it (no password field)", async () => {
+    const tr = fakeTransport({
+      "/v1/me/security": { email: "a@b.test", hasPassword: true, companyManaged: false, authenticator: false, recoveryCodes: 0, passkeys: [{ id: "pk1", name: "Mac" }], passkeysHere: true, offered: { authenticator: true, phone: false } },
+    });
+    tr.send = async (m, p, b) => {
+      tr.calls.push([m, p, b]);
+      if (p === "/v1/me/passkeys" && !b?.passkey) throw new ScreenError(403, "CONFIRM_NEEDED", "x", { email: "a@b.test", password: true, code: false, passkey: true });
+      return {};
+    };
+    const el = await render(<QAuthScreens transport={tr}><MyAccount sessions={false} tokens={false} activity={false} /></QAuthScreens>);
+    await act(async () => button(el, "Add a passkey").click());
+    await act(async () => { await new Promise((r) => setTimeout(r, 20)); });
+    const dialog = document.querySelector('[role="dialog"]');
+    expect(dialog.textContent).toContain("Confirm it's you to add a passkey");
+    expect(dialog.textContent).toContain("Use a passkey");
+    expect(dialog.querySelector('input[type="password"]')).toBeNull();
+    await act(async () => [...document.querySelectorAll('[role="dialog"] button')].find((b) => /close|✕/i.test(b.textContent) || b.getAttribute("aria-label"))?.click());
   });
 
   it("MyDevices offers no 'sign out the others' when this device is not known", async () => {

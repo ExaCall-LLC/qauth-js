@@ -640,8 +640,12 @@ export interface MySecurity {
   offered: { authenticator: boolean; phone: boolean };
 }
 
-/** A fresh proof that it is the person: their password, or an authenticator code. */
-export type Proof = { password: string } | { code: string };
+/**
+ * The person confirms it's them: their password, plus a code from their
+ * authenticator app when they have one (both are needed then). A 403
+ * CONFIRM_NEEDED says what is missing (its data: { password, code, passkey }).
+ */
+export type Proof = { password?: string; code?: string; /** the code POST /v1/me/confirm/phone sent (a person whose second step is their phone) */ phoneCode?: string };
 
 export interface SessionInfo {
   id: string;
@@ -1067,9 +1071,10 @@ export class PersonClient {
   };
 
   /**
-   * My account. Removing a factor or making new recovery codes needs a fresh
-   * proof (password or authenticator code); wrong proofs count toward the
-   * account's lockout.
+   * My account. Every change to second steps (setting up or removing the
+   * authenticator app or a phone, removing a passkey, new recovery codes)
+   * needs the person to confirm it's them (Proof); never a set-up first.
+   * Wrong proofs count toward the account's lockout.
    */
   readonly account = {
     security: (): Promise<MySecurity> => this.t.call("GET", "/v1/me/security"),
@@ -1083,13 +1088,13 @@ export class PersonClient {
       this.t.call("PUT", "/v1/me/password", { current, new: next }),
     authenticator: {
       /** Returns the otpauth:// address (show it as a QR code) and its secret. */
-      start: (): Promise<{ uri: string; secret: string }> => this.t.call("POST", "/v1/me/authenticator"),
+      start: (proof: Proof = {}): Promise<{ uri: string; secret: string }> => this.t.call("POST", "/v1/me/authenticator", proof),
       verify: (code: string): Promise<{ updated: boolean }> => this.t.call("POST", "/v1/me/authenticator/verify", { code }),
       remove: (proof: Proof): Promise<{ removed: boolean }> => this.t.call("DELETE", "/v1/me/authenticator", proof),
     },
     phone: {
       /** Sends a code to the number; it is saved once verify() gets the right code. */
-      add: (phone: string): Promise<{ codeSentTo: string }> => this.t.call("POST", "/v1/me/phone", { phone }),
+      add: (phone: string, proof: Proof = {}): Promise<{ codeSentTo: string }> => this.t.call("POST", "/v1/me/phone", { phone, ...proof }),
       verify: (code: string): Promise<{ updated: boolean }> => this.t.call("POST", "/v1/me/phone/verify", { code }),
       remove: (proof: Proof): Promise<{ removed: boolean }> => this.t.call("DELETE", "/v1/me/phone", proof),
     },

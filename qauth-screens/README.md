@@ -84,6 +84,12 @@ Change any text with `messages={{ "account.title": "Security" }}`.
 
 ## Changes
 
+- **0.12.0** (2026-11-26): "Confirm it's you" in `MyAccount`: a change to second steps runs at once and asks to
+  confirm only when qAuth answers `CONFIRM_NEEDED`, in a small dialog with just what the person has (their password,
+  plus a code when they have an authenticator app, or an existing passkey alone), the email shown read-only; never a
+  set-up first. Adding, removing and setting up the authenticator app and a phone, removing a passkey and new recovery
+  codes all use it (`useConfirm()` for your own changes). Where qAuth can make passkeys on the page (`passkeysHere`,
+  qAuth's Console and Portal), "Add a passkey" makes one right there. Needs a qAuth server with `CONFIRM_NEEDED`.
 - **0.11.0** (2026-11-26): instant sign-out. `<IdleWarning>` listens on the session's stream (through your
   `qauthProxy`; needs `@isdlc.ai/qauth` 0.25.0+, older versions poll) and ends at once when the session ends elsewhere;
   with `onSignIn` it says why ("You were signed out from another device", suspended, ...; English and Arabic) and

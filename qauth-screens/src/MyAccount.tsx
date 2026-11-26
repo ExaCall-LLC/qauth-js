@@ -2,7 +2,8 @@ import { useEffect, useState, type ReactNode } from "react";
 import QRCode from "qrcode";
 import { Alert, Badge, Button, Dialog, FormField, Table, TextInput, type UiColumn } from "@isdlc.ai/ui";
 import { useScreens } from "./context.js";
-import { Note, ProofDialog, Section, useLoad, type Msg } from "./shared.js";
+import { Note, Section, useConfirm, useLoad, type Msg } from "./shared.js";
+import { createPasskey, passkeysAvailable } from "./webauthn.js";
 import { MyTokens } from "./Tokens.js";
 import { RecentActivity } from "./Activity.js";
 
@@ -14,6 +15,7 @@ interface Security {
   phone?: string;
   recoveryCodes: number;
   passkeys?: { id: string; name: string }[];
+  passkeysHere?: boolean;
   offered: { authenticator: boolean; phone: boolean };
 }
 interface Session {
@@ -34,9 +36,10 @@ export interface MyAccountProps {
   /** Personal access tokens. Default true. */
   tokens?: boolean;
   /**
-   * Shows "Add a passkey": your app starts a fresh sign-in (passkeys are
-   * made on the sign-in pages, after the second step). Without it, new
-   * passkeys are only offered at sign-in.
+   * Shows "Add a passkey" where qAuth can't make one on this page (your
+   * app sends the person to its sign-in pages). Where it can
+   * (`passkeysHere`, e.g. qAuth's own Console and Portal), "Add a
+   * passkey" works on the page itself and this is not needed.
    */
   onAddPasskey?: () => void;
   /** Shown right under the title (e.g. the devices list, a profile card). */
@@ -59,8 +62,9 @@ export function MyAccount({ title, sessions = true, activity = true, tokens = tr
       {s.companyManaged ? <Alert tone="info">{t("account.company")}</Alert> : <PasswordSection />}
       {s.offered.authenticator || s.authenticator ? <AuthenticatorSection on={s.authenticator} reload={sec.reload} /> : null}
       {s.offered.phone || s.phone ? <PhoneSection phone={s.phone} reload={sec.reload} /> : null}
-      {(s.passkeys && s.passkeys.length) || (onAddPasskey && !s.companyManaged) ? (
-        <PasskeysSection keys={s.passkeys ?? []} reload={sec.reload} onAdd={s.companyManaged ? undefined : onAddPasskey} />
+      {(s.passkeys && s.passkeys.length) || s.passkeysHere || (onAddPasskey && !s.companyManaged) ? (
+        <PasskeysSection keys={s.passkeys ?? []} reload={sec.reload} here={!!s.passkeysHere} hasSecond={s.authenticator || (s.passkeys?.length ?? 0) > 0}
+          onAdd={s.companyManaged ? undefined : onAddPasskey} />
       ) : null}
       {s.authenticator || s.phone ? <RecoverySection left={s.recoveryCodes} reload={sec.reload} /> : null}
       {sessions ? <SessionsSection /> : null}
@@ -99,6 +103,7 @@ function PasswordSection() {
 
 function AuthenticatorSection({ on, reload }: { on: boolean; reload: () => void }) {
   const { t, api } = useScreens();
+  const { confirm, dialog } = useConfirm();
   const [setup, setSetup] = useState<{ uri: string; secret: string } | null>(null);
   const [qr, setQr] = useState("");
   const [code, setCode] = useState("");
@@ -109,7 +114,8 @@ function AuthenticatorSection({ on, reload }: { on: boolean; reload: () => void 
   const start = async () => {
     setMsg(null);
     try {
-      setSetup(await api.send("POST", "/v1/me/authenticator"));
+      const got = await confirm((p) => api.send<{ uri: string; secret: string }>("POST", "/v1/me/authenticator", p ?? {}));
+      if (got) setSetup(got);
     } catch (e) {
       setMsg({ tone: "danger", text: (e as Error).message });
     }
@@ -125,12 +131,12 @@ function AuthenticatorSection({ on, reload }: { on: boolean; reload: () => void 
   };
   return (
     <Section title={t("account.authenticator")}>
+      {dialog}
       <Note msg={msg} />
       <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
         <Badge tone={on ? "success" : "neutral"}>{on ? t("account.authOn") : t("account.authOff")}</Badge>
         {on ? (
-          <ProofDialog trigger={<Button size="sm" variant="ghost">{t("common.remove")}</Button>}
-            onProof={async (p) => { await api.send("DELETE", "/v1/me/authenticator", p); reload(); }} />
+          <Button size="sm" variant="ghost" onClick={() => void run(msgSetter(setMsg), () => confirm((p) => api.send("DELETE", "/v1/me/authenticator", p ?? {})), reload)}>{t("common.remove")}</Button>
         ) : !setup ? (
           <Button size="sm" onClick={start}>{t("account.authSetUp")}</Button>
         ) : null}
@@ -150,13 +156,15 @@ function AuthenticatorSection({ on, reload }: { on: boolean; reload: () => void 
 
 function PhoneSection({ phone, reload }: { phone?: string; reload: () => void }) {
   const { t, api } = useScreens();
+  const { confirm, dialog } = useConfirm();
   const [number, setNumber] = useState("");
   const [sentTo, setSentTo] = useState("");
   const [code, setCode] = useState("");
   const [msg, setMsg] = useState<Msg>(null);
   const add = async () => {
     try {
-      const r = await api.send<{ codeSentTo: string }>("POST", "/v1/me/phone", { phone: number });
+      const r = await confirm((p) => api.send<{ codeSentTo: string }>("POST", "/v1/me/phone", { phone: number, ...(p ?? {}) }));
+      if (!r) return;
       setSentTo(r.codeSentTo), setMsg({ tone: "success", text: t("account.phoneSent", { phone: r.codeSentTo }) });
     } catch (e) {
       setMsg({ tone: "danger", text: (e as Error).message });
@@ -173,12 +181,12 @@ function PhoneSection({ phone, reload }: { phone?: string; reload: () => void })
   };
   return (
     <Section title={t("account.phone")}>
+      {dialog}
       <Note msg={msg} />
       {phone ? (
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
           <span dir="ltr">{phone}</span>
-          <ProofDialog trigger={<Button size="sm" variant="ghost">{t("common.remove")}</Button>}
-            onProof={async (p) => { await api.send("DELETE", "/v1/me/phone", p); reload(); }} />
+          <Button size="sm" variant="ghost" onClick={() => void run(msgSetter(setMsg), () => confirm((p) => api.send("DELETE", "/v1/me/phone", p ?? {})), reload)}>{t("common.remove")}</Button>
         </div>
       ) : !sentTo ? (
         <>
@@ -195,8 +203,37 @@ function PhoneSection({ phone, reload }: { phone?: string; reload: () => void })
   );
 }
 
-function PasskeysSection({ keys, reload, onAdd }: { keys: { id: string; name: string }[]; reload: () => void; onAdd?: () => void }) {
+function PasskeysSection({ keys, reload, onAdd, here, hasSecond }: { keys: { id: string; name: string }[]; reload: () => void; onAdd?: () => void; here: boolean; hasSecond: boolean }) {
   const { t, api } = useScreens();
+  const { confirm, dialog } = useConfirm();
+  const [made, setMade] = useState<{ passkeyId: string; options: unknown } | null>(null);
+  const [busy, setBusy] = useState(false);
+  // the browser makes the passkey (face, fingerprint or device PIN); if it
+  // can't right away (no user gesture left, cancelled), "Try again" does
+  const create = async (start: { passkeyId: string; options: unknown }) => {
+    setBusy(true);
+    try {
+      const credential = await createPasskey(start.options);
+      await api.send("POST", `/v1/me/passkeys/${encodeURIComponent(start.passkeyId)}/verify`, { credential });
+      setMade(null);
+      setMsg({ tone: "success", text: t(hasSecond ? "passkey.added" : "passkey.addedFirst") });
+      reload();
+    } catch (e) {
+      setMade(start);
+      setMsg({ tone: "danger", text: (e as Error).name === "NotAllowedError" || !(e as Error).message ? t("passkey.failed") : (e as Error).message });
+    } finally {
+      setBusy(false);
+    }
+  };
+  const add = async () => {
+    setMsg(null);
+    try {
+      const start = await confirm((p) => api.send<{ passkeyId: string; options: unknown }>("POST", "/v1/me/passkeys", p ?? {}), t("confirm.addPasskey"));
+      if (start) await create(start);
+    } catch (e) {
+      setMsg({ tone: "danger", text: (e as Error).message });
+    }
+  };
   const [renaming, setRenaming] = useState<{ id: string; name: string } | null>(null);
   const [name, setName] = useState("");
   const [msg, setMsg] = useState<Msg>(null);
@@ -213,17 +250,25 @@ function PasskeysSection({ keys, reload, onAdd }: { keys: { id: string; name: st
     }
   };
   return (
-    <Section title={t("account.passkeys")} hint={t(onAdd ? "account.passkeysAddHint" : "account.passkeysHint")}>
+    <Section title={t("account.passkeys")} hint={t(here ? "passkey.hereHint" : onAdd ? "account.passkeysAddHint" : "account.passkeysHint")}>
+      {dialog}
       <Note msg={msg} />
       {keys.length === 0 ? <p style={{ margin: 0, fontSize: 14, opacity: 0.75 }}>{t("account.passkeysNone")}</p> : null}
-      {onAdd ? <div><Button size="sm" onClick={onAdd}>{t("account.passkeyAdd")}</Button></div> : null}
+      {here && passkeysAvailable() ? (
+        <div style={{ display: "flex", gap: 8 }}>
+          {made ? (
+            <Button size="sm" variant="primary" onClick={() => void create(made)} disabled={busy}>{t("passkey.tryAgain")}</Button>
+          ) : (
+            <Button size="sm" onClick={() => void add()} disabled={busy}>{t("account.passkeyAdd")}</Button>
+          )}
+        </div>
+      ) : onAdd ? <div><Button size="sm" onClick={onAdd}>{t("account.passkeyAdd")}</Button></div> : null}
       {keys.map((k) => (
         <div key={k.id} style={{ display: "flex", gap: 8, alignItems: "center", justifyContent: "space-between" }}>
           <span>{k.name || t("account.passkeys")}</span>
           <span style={{ display: "inline-flex", gap: 4 }}>
             <Button size="sm" variant="ghost" onClick={() => (setRenaming(k), setName(k.name))}>{t("account.passkeyRename")}</Button>
-            <ProofDialog trigger={<Button size="sm" variant="ghost">{t("common.remove")}</Button>}
-              onProof={async (p) => { await api.send("DELETE", `/v1/me/passkeys/${encodeURIComponent(k.id)}`, p); reload(); }} />
+            <Button size="sm" variant="ghost" onClick={() => void run(msgSetter(setMsg), () => confirm((p) => api.send("DELETE", `/v1/me/passkeys/${encodeURIComponent(k.id)}`, p ?? {})), reload)}>{t("common.remove")}</Button>
           </span>
         </div>
       ))}
@@ -239,15 +284,21 @@ function PasskeysSection({ keys, reload, onAdd }: { keys: { id: string; name: st
 
 function RecoverySection({ left, reload }: { left: number; reload: () => void }) {
   const { t, api } = useScreens();
+  const { confirm, dialog } = useConfirm();
   const [codes, setCodes] = useState<string[] | null>(null);
   const [msg, setMsg] = useState<Msg>(null);
-  const make = async (proof?: object) => {
-    const r = await api.send<{ codes: string[] }>("POST", "/v1/me/recovery-codes", proof ?? {});
-    setCodes(r.codes);
-    reload();
+  const make = async () => {
+    setMsg(null);
+    try {
+      const r = await confirm((p) => api.send<{ codes: string[] }>("POST", "/v1/me/recovery-codes", p ?? {}));
+      if (r) setCodes(r.codes), reload();
+    } catch (e) {
+      setMsg({ tone: "danger", text: (e as Error).message });
+    }
   };
   return (
     <Section title={t("account.recovery")} hint={t("account.recoveryLeft", { n: left })}>
+      {dialog}
       <Note msg={msg} />
       {codes ? (
         <>
@@ -255,10 +306,8 @@ function RecoverySection({ left, reload }: { left: number; reload: () => void })
           <pre dir="ltr" style={{ margin: 0, fontSize: 14, lineHeight: 1.6 }}>{codes.join("\n")}</pre>
           <div><Button onClick={() => setCodes(null)}>{t("common.done")}</Button></div>
         </>
-      ) : left > 0 ? (
-        <ProofDialog trigger={<Button size="sm">{t("account.recoveryNew")}</Button>} onProof={(p) => make(p)} />
       ) : (
-        <div><Button size="sm" onClick={() => make().catch((e: Error) => setMsg({ tone: "danger", text: e.message }))}>{t("account.recoveryNew")}</Button></div>
+        <div><Button size="sm" onClick={() => void make()}>{t("account.recoveryNew")}</Button></div>
       )}
     </Section>
   );
@@ -289,4 +338,16 @@ function SessionsSection() {
       <div><Button variant="ghost" onClick={() => end("/v1/me/sessions")}>{t("account.endAll")}</Button></div>
     </Section>
   );
+}
+
+const msgSetter = (set: (m: Msg) => void) => set;
+
+/** Runs a change that may ask to confirm; reloads after it (not after a cancel). */
+async function run(setMsg: (m: Msg) => void, change: () => Promise<unknown>, reload: () => void) {
+  setMsg(null);
+  try {
+    if ((await change()) !== undefined) reload();
+  } catch (e) {
+    setMsg({ tone: "danger", text: (e as Error).message });
+  }
 }

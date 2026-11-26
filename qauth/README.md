@@ -224,14 +224,14 @@ await org.setSecurity({ mfaRequired: true });
 await org.audit({ limit: 50 });
 
 // My account (the person's own): password, authenticator, phone, recovery codes, sessions.
-// Removing a factor or new recovery codes needs a fresh proof: { password } or { code }.
+// Every change to second steps needs a proof: { password }, plus { code } when they have an authenticator app.
 await me.account.security();
 await me.account.changePassword(current, next);
-const { uri } = await me.account.authenticator.start();   // show as a QR code
+const { uri } = await me.account.authenticator.start({ password });   // show as a QR code
 await me.account.authenticator.verify("123456");
-await me.account.authenticator.remove({ code: "123456" });
-await me.account.phone.add("+966512345678"); await me.account.phone.verify(code);
-const { codes } = await me.account.recoveryCodes();        // shown once
+await me.account.authenticator.remove({ password, code: "123456" }); // with an authenticator: both
+await me.account.phone.add("+966512345678", { password, code }); await me.account.phone.verify(code);
+const { codes } = await me.account.recoveryCodes({ password, code }); // shown once; always confirmed
 await me.account.sessions.list(); await me.account.sessions.endAll(); // signs out everywhere
 
 // Server to server: an organization's API key on its own org (scopes qauth:org:read,
@@ -381,6 +381,10 @@ A "this device" marker in the session list (tokens don't name their session).
 
 ## Changes
 
+- **0.26.0** (2026-11-26): "confirm it's you", one rule for every change to second steps: `authenticator.start(proof)`
+  and `phone.add(phone, proof)` take a proof now; a person with an authenticator app confirms with their password and a
+  code (`{ password, code }`), others with their password. A missing part is a 403 `CONFIRM_NEEDED`. Needs a qAuth
+  server with it.
 - **0.25.1** (2026-11-26): docs only: an organization key may have only qAuth scopes (`qauth:org:*`) and no API permission; such a key is for qAuth's organization routes and can't use your API.
 - **0.25.0** (2026-11-26): instant sign-out. `watchIdle` takes `source.events` (qAuth's session stream,
   `me.account.sessions.events(sid, { clientId, signal })`) and calls `onEnded` the moment the session ends, for any
