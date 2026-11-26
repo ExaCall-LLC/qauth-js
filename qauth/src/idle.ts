@@ -5,11 +5,22 @@
  * (at most once a minute, shared by every tab of the session), warns before
  * the end, and says when the session is over.
  *
+ * Instant sign-out: with `source.events` the watcher keeps qAuth's session
+ * stream open (GET /v1/me/sessions/{sid}/events) and ends the moment qAuth
+ * says the session ended, for any reason (signed out on another device, by
+ * an admin, suspended, ...). It reconnects with backoff, and while the
+ * stream is down it asks for the session's state every pollSeconds.
+ *
  * Times are counted in seconds left, as qAuth answers them, so a wrong
  * device clock doesn't matter.
  */
 
-export type SessionEnd = "signed_out" | "idle" | "max_length" | "client_removed";
+/**
+ * Why a session ended. `replaced`: signed out to make room for a new
+ * sign-in at the app's session limit; `access_removed`: the person may no
+ * longer use the app; `suspended`: their account was suspended.
+ */
+export type SessionEnd = "signed_out" | "idle" | "max_length" | "client_removed" | "access_removed" | "suspended" | "replaced";
 
 export interface SessionState {
   sessionId: string;
@@ -23,12 +34,28 @@ export interface SessionState {
   maxSecondsLeft: number;
   /** Set when the session is over, with why. */
   ended?: SessionEnd;
+  /** How often to ask when the session's stream can't stay open (the platform's setting). */
+  pollSeconds?: number;
+}
+
+/** The answer of the session's stream: a fetch Response (its body is read as it comes). */
+export interface StreamResponse {
+  status: number;
+  ok: boolean;
+  body: ReadableStream<Uint8Array> | null;
+  headers?: { get(name: string): string | null };
 }
 
 /** Where the watcher reads the session and reports activity. */
 export interface IdleSource {
   state(): Promise<SessionState>;
   activity(): Promise<SessionState>;
+  /**
+   * Opens the session's stream (GET /v1/me/sessions/{sid}/events, with the
+   * person's token in the Authorization header or through your proxy),
+   * stopped by the signal. Leave it out to check by polling only.
+   */
+  events?(signal: AbortSignal): Promise<StreamResponse>;
 }
 
 export interface IdleWarning {
@@ -53,8 +80,18 @@ export interface IdleWatchOptions {
   events?: string[];
   /** Where to listen. Default: window. */
   target?: EventTarget;
+  /**
+   * While the stream is down (or without `source.events`), ask for the
+   * session's state this often. Default: what qAuth's state answer says
+   * (the platform's sessionPollSeconds), else 45.
+   */
+  pollSeconds?: number;
+  /** The longest wait between stream reconnects (seconds). Default 60. */
+  maxBackoffSeconds?: number;
   /** For tests. */
   now?: () => number;
+  /** For tests (0..1). */
+  random?: () => number;
 }
 
 export interface IdleWatch {
@@ -83,6 +120,19 @@ export function watchIdle(o: IdleWatchOptions): IdleWatch {
   let ended = false;
   let checking = false;
   let reporting: Promise<void> | null = null;
+  // the stream and the polling while it is down
+  const random = o.random ?? Math.random;
+  const maxBackoff = (o.maxBackoffSeconds ?? 60) * 1000;
+  let serverPoll = 0;
+  const pollMs = () => (o.pollSeconds ?? 0) * 1000 || serverPoll || 45000;
+  let lastCheck = now();
+  let streamUp = false;
+  let connecting = false;
+  let nextConnect = 0;
+  let failures = 0;
+  let lastByte = 0;
+  let deadMs = 75000; // three heartbeats of 25 s
+  let abort: AbortController | null = null;
 
   const end = (reason: SessionEnd, tell = true) => {
     if (ended) return;
@@ -93,6 +143,7 @@ export function watchIdle(o: IdleWatchOptions): IdleWatch {
   };
 
   const apply = (st: SessionState, at = now()) => {
+    if (st.pollSeconds && st.pollSeconds > 0) serverPoll = st.pollSeconds * 1000;
     if (st.ended) return end(st.ended);
     idleMs = st.idleMinutes * 60000;
     idleAt = st.idleSecondsLeft < 0 ? Infinity : at + st.idleSecondsLeft * 1000;
@@ -134,6 +185,7 @@ export function watchIdle(o: IdleWatchOptions): IdleWatch {
   const check = async (): Promise<void> => {
     if (checking || ended) return;
     checking = true;
+    lastCheck = now();
     try {
       apply(await o.source.state());
     } catch (e) {
@@ -143,9 +195,115 @@ export function watchIdle(o: IdleWatchOptions): IdleWatch {
     }
   };
 
+  // the next try after a failure: doubling, with jitter (tabs don't all
+  // come back at once), never past maxBackoff; a refusal for too many
+  // streams waits at least a poll interval
+  const retryLater = (atLeast = 0) => {
+    failures++;
+    const base = Math.min(maxBackoff, 1000 * 2 ** Math.min(failures - 1, 16));
+    nextConnect = now() + Math.max(atLeast, Math.round(base * (0.8 + 0.4 * random())));
+  };
+
+  const onEvent = (name: string, data: string, ac: AbortController) => {
+    let d: Record<string, unknown> = {};
+    try {
+      d = JSON.parse(data || "{}") as Record<string, unknown>;
+    } catch {
+      /* no data */
+    }
+    if (name === "ready") {
+      failures = 0;
+      if (typeof d.heartbeatSeconds === "number" && d.heartbeatSeconds > 0) deadMs = d.heartbeatSeconds * 3000;
+      if (typeof d.pollSeconds === "number" && d.pollSeconds > 0) serverPoll = d.pollSeconds * 1000;
+    } else if (name === "ended") {
+      end(((d.reason as SessionEnd) || "signed_out") as SessionEnd);
+      ac.abort();
+    } else if (name === "reconnect") {
+      nextConnect = now(); // at once: the stream had its time, or qAuth restarts
+      ac.abort();
+    }
+  };
+
+  const read = async (body: ReadableStream<Uint8Array>, ac: AbortController) => {
+    const reader = body.getReader();
+    const dec = new TextDecoder();
+    let buf = "";
+    try {
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done || ac.signal.aborted) return;
+        lastByte = now();
+        buf += dec.decode(value, { stream: true }).replace(/\r\n?/g, "\n");
+        let i: number;
+        while ((i = buf.indexOf("\n\n")) >= 0) {
+          const block = buf.slice(0, i);
+          buf = buf.slice(i + 2);
+          let name = "message";
+          const data: string[] = [];
+          for (const line of block.split("\n")) {
+            if (line.startsWith("event:")) name = line.slice(6).trim();
+            else if (line.startsWith("data:")) data.push(line.slice(5).trimStart());
+          }
+          onEvent(name, data.join("\n"), ac);
+          if (ac.signal.aborted) return;
+        }
+      }
+    } finally {
+      reader.cancel().catch(() => undefined);
+    }
+  };
+
+  const connect = async () => {
+    const open = o.source.events?.bind(o.source);
+    if (!open || ended || connecting) return;
+    connecting = true;
+    const ac = new AbortController();
+    abort = ac;
+    let res: StreamResponse;
+    try {
+      res = await open(ac.signal);
+    } catch {
+      connecting = false;
+      abort = null;
+      if (!ended) retryLater();
+      return;
+    }
+    try {
+      if (res.status === 401) {
+        refusedEnd({ status: 401 });
+        return;
+      }
+      if (!res.ok || !res.body) {
+        // 429: too many streams; 503: not offered or restarting: poll meanwhile
+        const ra = Number(res.headers?.get("retry-after") ?? "");
+        retryLater(res.status === 429 ? Math.max(pollMs(), Number.isFinite(ra) ? ra * 1000 : 0) : 0);
+        await res.body?.cancel().catch(() => undefined);
+        return;
+      }
+      streamUp = true;
+      lastByte = now();
+      nextConnect = 0;
+      await read(res.body, ac);
+      if (!ended && !ac.signal.aborted) retryLater(); // closed under us
+      else if (!ended && nextConnect === 0) retryLater(); // dead stream, aborted by the tick
+    } catch {
+      if (!ended && nextConnect === 0) retryLater();
+    } finally {
+      streamUp = false;
+      connecting = false;
+      if (abort === ac) abort = null;
+    }
+  };
+
   const tick = () => {
     if (ended) return;
     const t = now();
+    if (streamUp) {
+      if (t - lastByte > deadMs) abort?.abort(); // no heartbeat: reconnect
+    } else {
+      if (t - lastCheck >= pollMs()) void check();
+      if (o.source.events && !connecting && t >= nextConnect) void connect();
+    }
     if (pending && !warned && t - lastReport >= reportGap()) void report();
     const reason: IdleWarning["reason"] = maxAt <= idleAt ? "max_length" : "idle";
     const left = Math.min(idleAt, maxAt) - t;
@@ -192,9 +350,11 @@ export function watchIdle(o: IdleWatchOptions): IdleWatch {
   if (typeof document !== "undefined") document.addEventListener("visibilitychange", onVisible);
   const timer = setInterval(tick, 1000);
   void check();
+  void connect();
 
   function stop() {
     clearInterval(timer);
+    abort?.abort();
     for (const ev of events) target?.removeEventListener(ev, onActivity);
     if (typeof document !== "undefined") document.removeEventListener("visibilitychange", onVisible);
     channel?.close();

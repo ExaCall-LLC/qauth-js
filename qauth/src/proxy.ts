@@ -15,7 +15,12 @@
  * is your backend's own call); no "..", no encoded
  * slashes or dots; a request that changes something must carry the header
  * "x-qauth-request: 1" (a cross-site form cannot add it: CSRF protection);
- * only JSON goes through, no cookies either way.
+ * only JSON goes through, no cookies either way. One exception: a session's
+ * stream (GET /v1/me/sessions/{sid}/events, instant sign-out) is passed
+ * through as it comes (text/event-stream, never buffered), and ends when the
+ * browser goes. Your host must not buffer it either (on Next.js, Node
+ * runtime route handlers stream; behind nginx the answer says
+ * X-Accel-Buffering: no).
  */
 
 export interface ProxyOptions {
@@ -56,13 +61,20 @@ export function qauthProxy(o: ProxyOptions): (req: Request) => Promise<Response>
     }
     const token = await o.accessToken(req);
     if (!token) return json(401, "UNAUTHORIZED", "Please sign in.");
-    const headers: Record<string, string> = { accept: "application/json", authorization: `Bearer ${token}` };
+    const stream = method === "GET" && /^\/v1\/me\/sessions\/[A-Za-z0-9._~-]+\/events\/?$/.test(path);
+    const headers: Record<string, string> = { accept: stream ? "text/event-stream" : "application/json", authorization: `Bearer ${token}` };
     let body: string | undefined;
     if (method !== "GET") {
       body = await req.text();
       if (body) headers["content-type"] = "application/json";
     }
-    const res = await f(base + path + url.search, { method, headers, body, redirect: "manual" });
+    const res = await f(base + path + url.search, { method, headers, body, redirect: "manual", signal: stream ? req.signal : undefined });
+    if (stream && res.ok && res.body && (res.headers.get("content-type") ?? "").startsWith("text/event-stream")) {
+      return new Response(res.body, {
+        status: res.status,
+        headers: { "content-type": "text/event-stream; charset=utf-8", "cache-control": "no-store", "x-accel-buffering": "no" },
+      });
+    }
     const out = new Headers({ "content-type": res.headers.get("content-type") ?? "application/json", "cache-control": "no-store" });
     return new Response(await res.text(), { status: res.status, headers: out });
   };

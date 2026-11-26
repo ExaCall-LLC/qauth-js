@@ -467,9 +467,13 @@ export interface ApiKey {
 
 export interface NewApiKey {
   name: string;
-  /** API permission ids the key may use (never more than you hold). */
+  /** API permission ids the key may use (never more than you hold; only the organization's own levels' and floating ones). */
   permissions?: string[];
-  /** qAuth's organization-API scopes (qauth:org:*). */
+  /**
+   * qAuth's organization-API scopes (qauth:org:*). A key with only scopes (no
+   * permission) is for qAuth's organization routes: no API accepts it
+   * (/auth/validate answers 401).
+   */
   scopes?: string[];
   /** App ids the key is for; the org must be able to use each of them. */
   apps?: string[];
@@ -724,6 +728,22 @@ class Transport {
 
   async call<T>(method: string, path: string, body?: unknown, query?: Query, extra?: Record<string, string>): Promise<T> {
     return (await this.raw(method, path, body, query, extra)).data as T;
+  }
+
+  /**
+   * A stream (Server-Sent Events): the raw answer, its body read as it
+   * comes; stopped by the signal. No timeout (a stream stays open), never
+   * a redirect.
+   */
+  async stream(path: string, query?: Query, signal?: AbortSignal): Promise<Response> {
+    if (path.split("?")[0].split("/").slice(1).some((p) => p === "" || p === "." || p === "..")) {
+      throw new QAuthError(400, "VALIDATION_ERROR", "An id in the request is empty or not allowed.");
+    }
+    const url = new URL((typeof this.base === "string" ? this.base : await this.base()) + path);
+    for (const [k, v] of Object.entries(query ?? {})) {
+      if (v !== undefined && v !== "") url.searchParams.set(k, String(v));
+    }
+    return this.f(url, { method: "GET", headers: { accept: "text/event-stream", ...this.auth }, signal, redirect: "manual" });
   }
 
   async list<T>(path: string, query?: Query): Promise<Page<T>> {
@@ -1094,6 +1114,13 @@ export class PersonClient {
       /** "Still here": resets the idle timer of YOUR app's session (pass your clientId). watchIdle sends it for you. */
       activity: (sessionId: string, clientId?: string): Promise<SessionState> =>
         this.t.call("POST", `/v1/me/sessions/${seg(sessionId)}/activity${clientQuery(clientId)}`),
+      /**
+       * Instant sign-out: the session's stream (Server-Sent Events: ready, ping, ended {reason}, reconnect), as a raw
+       * Response read as it comes; stop it with the signal. watchIdle's `source.events` takes it as it is. On a server
+       * (Node: no window), watchIdle with this source only watches: it reconnects, falls back to polling, and calls onEnded.
+       */
+      events: (sessionId: string, opts: { clientId?: string; signal?: AbortSignal } = {}): Promise<Response> =>
+        this.t.stream(`/v1/me/sessions/${seg(sessionId)}/events`, { client: opts.clientId }, opts.signal),
     },
     /**
      * My account › Devices: everywhere the person is signed in to the
@@ -1260,7 +1287,22 @@ export interface SessionSettings {
   pairingAppTries: number;
   /** Idle sign-out per device type: -1 never (TVs by default), 0 the app's usual rule, or minutes. */
   idleByType: Partial<Record<DeviceType, number>>;
+  /** The first sign-in screen: the email only (default), or email and password together. */
+  signinForm: "email_first" | "one_screen";
+  /** No "Choose an account" list / last email / passkey autofill on this app's sign-in page. */
+  skipChooser: boolean;
+  skipLastEmail: boolean;
+  skipPasskeyAutofill: boolean;
+  /** "Email me a code" signs in with a one-time code instead of the password. */
+  emailCodeSignIn: boolean;
+  /** Emails at a verified domain are not sent to their company sign-in after the first screen. */
+  skipCompanyByDomain: boolean;
+  /** When a reused shared sign-in asks a quick check: minutes without activity, always, never, or the tenant's default. */
+  reverifyOnReuse: ReverifyOnReuse;
 }
+
+/** Minutes (1 to 1440) without activity in the browser, or "always" | "never" | "default" (the tenant's rule). */
+export type ReverifyOnReuse = number | "always" | "never" | "default";
 
 /** An organization's stricter settings for one app (left out = the app's). */
 export type OrgSessionSettings = Partial<Pick<SessionSettings, "maxSessions" | "perType" | "atLimit" | "replace" | "deviceSignIn" | "deviceCodeMinutes" | "pairing" | "pairingMinutes" | "wrongTries" | "secondStep" | "phoneSignIn" | "sharedIdleMinutes" | "kioskQr" | "freshMinutes">> & {
@@ -1268,6 +1310,15 @@ export type OrgSessionSettings = Partial<Pick<SessionSettings, "maxSessions" | "
   numberMatch?: boolean;
   /** A shorter idle time per device type (minutes). */
   idleByType?: Partial<Record<DeviceType, number>>;
+  /** Only "email_first" (stricter). */
+  signinForm?: "email_first";
+  /** Only true (stricter). */
+  skipChooser?: boolean;
+  skipLastEmail?: boolean;
+  /** Only false (stricter). */
+  emailCodeSignIn?: boolean;
+  /** "always", or fewer minutes than the app's rule. */
+  reverifyOnReuse?: number | "always";
 };
 
 export interface OrgSessionSettingsView {
@@ -1603,7 +1654,7 @@ export { qauthProxy, type ProxyOptions } from "./proxy.js";
 export { Verifier, bearerToken, errorResponse, identityOf, type VerifierOptions, type Identity, type ConnectMiddleware, type MiddlewareRequest, type MiddlewareResponse } from "./verify.js";
 export { TokenErrorCode, parseRetryAfter } from "./errors.js";
 export { startDeviceSignIn, pollDeviceToken, pairDevice, type DeviceSignIn, type DeviceSignInOptions, type DeviceTokens } from "./device.js";
-export { watchIdle, sessionIdOf, type IdleWatch, type IdleWatchOptions, type IdleSource, type IdleWarning, type SessionState, type SessionEnd } from "./idle.js";
+export { watchIdle, sessionIdOf, type IdleWatch, type IdleWatchOptions, type IdleSource, type IdleWarning, type SessionState, type SessionEnd, type StreamResponse } from "./idle.js";
 
 export default QAuth;
 

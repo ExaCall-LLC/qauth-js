@@ -20,6 +20,12 @@ export class ScreenError extends Error {
 export interface Transport {
   get<T>(path: string): Promise<T>;
   send<T>(method: "POST" | "PUT" | "DELETE", path: string, body?: unknown): Promise<T>;
+  /**
+   * A stream (the session's events, instant sign-out): the raw answer, read
+   * as it comes; stopped by the signal. Optional: without it the screens
+   * check by polling.
+   */
+  stream?(path: string, signal: AbortSignal): Promise<Response>;
 }
 
 export function createTransport(basePath = "/qauth", f: typeof fetch = (...a) => fetch(...a)): Transport {
@@ -40,5 +46,9 @@ export function createTransport(basePath = "/qauth", f: typeof fetch = (...a) =>
     }
     return env.data as T;
   }
-  return { get: (p) => call("GET", p), send: (m, p, b) => call(m, p, b) };
+  return {
+    get: (p) => call("GET", p),
+    send: (m, p, b) => call(m, p, b),
+    stream: (p, signal) => f(base + p, { method: "GET", headers: { accept: "text/event-stream" }, credentials: "same-origin", signal }),
+  };
 }

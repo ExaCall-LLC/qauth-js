@@ -9,7 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
-import { QAuth, QAuthError, qauthProxy, isFreshStepUp, stepUpParams, keyMay } from "../dist/index.js";
+import { QAuth, QAuthError, qauthProxy, isFreshStepUp, stepUpParams, keyMay, watchIdle } from "../dist/index.js";
 
 const repo = fileURLToPath(new URL("../../../", import.meta.url));
 let proc;
@@ -480,4 +480,47 @@ test("an organization makes an app's session settings stricter, never looser", a
   assert.equal(set.effective.maxSessions, 2);
   assert.equal(set.effective.atLimit, "refuse");
   assert.deepEqual((await shop.sessionSettings.set(seed.app, {})).override, {});
+});
+
+// keep these last: they end cafe-admin's first session
+test("instant sign-out: the screens' proxy passes the session's stream through as it comes", { timeout: 5000 }, async () => {
+  const proxy = qauthProxy({ baseUrl: seed.baseUrl, mount: "/qauth", accessToken: () => "cafe-admin-token" });
+  const ac = new AbortController();
+  const r = await proxy(new Request("https://product.example/qauth/v1/me/sessions/sess-cafe-admin-1/events?client=cid-live", { signal: ac.signal }));
+  assert.equal(r.status, 200);
+  assert.match(r.headers.get("content-type"), /^text\/event-stream/);
+  assert.equal(r.headers.get("x-accel-buffering"), "no");
+  const reader = r.body.getReader();
+  let got = "";
+  while (!got.includes("event: ready")) {
+    const { value, done } = await reader.read(); // a buffering proxy would never answer before the stream ends
+    assert.ok(!done, "the stream ended early");
+    got += new TextDecoder().decode(value);
+  }
+  ac.abort();
+  await reader.cancel().catch(() => undefined);
+});
+
+test("instant sign-out: watchIdle on qAuth's stream ends the moment the session is signed out elsewhere", async () => {
+  const me = qauth().as("cafe-admin-token").account;
+  const sid = "sess-cafe-admin-1";
+  const ended = [];
+  let opened = 0;
+  const w = watchIdle({
+    sessionId: sid,
+    source: {
+      state: () => me.sessions.state(sid, "cid-live"),
+      activity: () => me.sessions.activity(sid, "cid-live"),
+      events: (signal) => (opened++, me.sessions.events(sid, { clientId: "cid-live", signal })),
+    },
+    onEnded: (r) => ended.push(r),
+  });
+  await new Promise((r) => setTimeout(r, 300)); // the stream is open
+  assert.equal(opened, 1);
+  const start = Date.now();
+  assert.deepEqual(await me.sessions.end(sid), { removed: true }); // "sign out" on another device
+  while (ended.length === 0 && Date.now() - start < 2000) await new Promise((r) => setTimeout(r, 20));
+  assert.deepEqual(ended, ["signed_out"]);
+  assert.ok(Date.now() - start < 1000, `ended after ${Date.now() - start} ms`);
+  w.stop();
 });

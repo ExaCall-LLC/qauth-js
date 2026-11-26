@@ -18,7 +18,7 @@ One runtime dependency: [`jose`](https://github.com/panva/jose) for token signat
 Public, no account or token needed:
 
 ```bash
-npm install https://github.com/ExaCall-LLC/qauth-js/releases/download/qauth-v0.23.0/isdlc.ai-qauth-0.23.0.tgz
+npm install https://github.com/ExaCall-LLC/qauth-js/releases/download/qauth-v0.25.1/isdlc.ai-qauth-0.25.1.tgz
 ```
 
 Every version is a release of [github.com/ExaCall-LLC/qauth-js](https://github.com/ExaCall-LLC/qauth-js/releases)
@@ -328,16 +328,23 @@ const sid = sessionIdOf(idToken);
 const me = new QAuth({ baseUrl }).as(accessToken).account; // server side, or call your proxy
 const watch = watchIdle({
   sessionId: sid,
-  source: { state: () => me.sessions.state(sid), activity: () => me.sessions.activity(sid) },
+  source: {
+    state: () => me.sessions.state(sid),
+    activity: () => me.sessions.activity(sid),
+    // instant sign-out: qAuth's stream says the moment the session ends elsewhere
+    events: (signal) => me.sessions.events(sid, { signal }),
+  },
   onWarn: ({ reason, secondsLeft }) => showCountdown(reason, secondsLeft), // reason: idle | max_length
   onActive: () => hideCountdown(),
-  onEnded: (reason) => signOutLocally(reason), // signed_out | idle | max_length
+  onEnded: (reason) => signOutLocally(reason), // signed_out | idle | max_length | suspended | replaced | ...
 });
 // "Stay signed in" → watch.stillHere()
 ```
 
 Activity is shared by every tab of the session; times are seconds left, so a wrong device
-clock doesn't matter. `@isdlc.ai/qauth-screens` has it ready as `<IdleWarning>`.
+clock doesn't matter. While the stream is down it reconnects with backoff and asks `state`
+every `pollSeconds` (option; else qAuth's; else 45). `qauthProxy` passes the stream through
+unbuffered. `@isdlc.ai/qauth-screens` has it ready as `<IdleWarning>`.
 
 ## Errors
 
@@ -374,6 +381,16 @@ A "this device" marker in the session list (tokens don't name their session).
 
 ## Changes
 
+- **0.25.1** (2026-11-26): docs only: an organization key may have only qAuth scopes (`qauth:org:*`) and no API permission; such a key is for qAuth's organization routes and can't use your API.
+- **0.25.0** (2026-11-26): instant sign-out. `watchIdle` takes `source.events` (qAuth's session stream,
+  `me.account.sessions.events(sid, { clientId, signal })`) and calls `onEnded` the moment the session ends, for any
+  reason; it reconnects with backoff and polls `state` every `pollSeconds` while the stream is down (option, else
+  qAuth's `pollSeconds` in the state answer, else 45). `qauthProxy` passes the session's stream through unbuffered.
+  `SessionEnd` adds `access_removed`, `suspended`, `replaced`; `SessionState.pollSeconds`; `StreamResponse`.
+- **0.24.0** (2026-11-26): the sign-in page and "verify again when the shared sign-in is reused" in `SessionSettings`
+  (`signinForm`, `skipChooser`, `skipLastEmail`, `skipPasskeyAutofill`, `emailCodeSignIn`, `skipCompanyByDomain`,
+  `reverifyOnReuse`: `ReverifyOnReuse` = minutes or `"always" | "never" | "default"`) and in an organization's stricter
+  `OrgSessionSettings`.
 - **0.23.0** (2026-11-26): company sign-in and domains. `SSOSpec.publicClient` (a client without a secret, PKCE, such
   as another qAuth tenant's web client), `SSOConnection.publicClient`, `SSOState.otherDirectoryApps` (apps the
   organization can use that sign in from another directory: company sign-in does not cover them), and

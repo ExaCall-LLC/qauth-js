@@ -30,7 +30,7 @@ npm install @isdlc.ai/qauth @isdlc.ai/qauth-screens
 The package itself is also a public release of
 [github.com/ExaCall-LLC/qauth-js](https://github.com/ExaCall-LLC/qauth-js/releases) (MIT): tag
 `qauth-screens-vX.Y.Z`, file `isdlc.ai-qauth-screens-X.Y.Z.tgz`, e.g.
-`https://github.com/ExaCall-LLC/qauth-js/releases/download/qauth-screens-v0.9.1/isdlc.ai-qauth-screens-0.9.1.tgz`.
+`https://github.com/ExaCall-LLC/qauth-js/releases/download/qauth-screens-v0.11.0/isdlc.ai-qauth-screens-0.11.0.tgz`.
 
 ## 1. Your backend: mount the proxy
 
@@ -71,8 +71,12 @@ app's Sign-in settings, made stricter per organization.
 ```tsx
 import { sessionIdOf } from "@isdlc.ai/qauth";
 
-<IdleWarning sessionId={sessionIdOf(idToken)} onEnded={() => signOutLocally()} onSignOut={() => signOut()} />
+<IdleWarning sessionId={sessionIdOf(idToken)} onEnded={() => signOutLocally()} onSignOut={() => signOut()} onSignIn={() => goToSignIn()} />
 ```
+
+Instant sign-out: it keeps the session's stream open through your proxy and ends the moment
+the session ends elsewhere; with `onSignIn` it says why ("You were signed out from another
+device", ...) and returns to your sign-in. Without a stream it checks every `pollSeconds`.
 
 What each person can do is decided by qAuth (admins, managers, members), so the same
 screen shows refusals as messages; show the org screens to the roles that use them.
@@ -80,6 +84,10 @@ Change any text with `messages={{ "account.title": "Security" }}`.
 
 ## Changes
 
+- **0.11.0** (2026-11-26): instant sign-out. `<IdleWarning>` listens on the session's stream (through your
+  `qauthProxy`; needs `@isdlc.ai/qauth` 0.25.0+, older versions poll) and ends at once when the session ends elsewhere;
+  with `onSignIn` it says why ("You were signed out from another device", suspended, ...; English and Arabic) and
+  returns to your sign-in after `returnAfterSeconds` (default 3). `pollSeconds`; `Transport.stream`.
 - **0.10.0** (2026-11-26): `<MyAccount sessions={false} tokens={false} activity={false} onAddPasskey={…}>`: leave
   sections out, put your own (e.g. `<MyDevices />`) under the title as children, and show "Add a passkey" (your app
   starts a fresh sign-in; the passkey is made on the sign-in pages after the second step). `<MyDevices />` gets

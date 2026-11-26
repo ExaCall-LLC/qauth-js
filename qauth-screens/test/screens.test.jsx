@@ -437,3 +437,76 @@ describe("idle warning", () => {
     expect(ended).toEqual(["signed_out"]);
   });
 });
+
+describe("instant sign-out", () => {
+  const state = (o) => ({ sessionId: "s9", idleMinutes: 15, maxMinutes: 0, idleSecondsLeft: 900, maxSecondsLeft: -1, ...o });
+  // a transport whose stream the test drives (as qAuth's, through the proxy)
+  function streamingTransport() {
+    const t = { calls: [], streams: [] };
+    t.get = async (p) => (t.calls.push(["GET", p]), state({}));
+    t.send = async (m, p) => (t.calls.push([m, p]), state({}));
+    t.stream = async (p, signal) => {
+      t.calls.push(["STREAM", p]);
+      let ctl;
+      const body = new ReadableStream({ start: (c) => (ctl = c) });
+      const enc = new TextEncoder();
+      const s = { push: (name, data = {}) => ctl.enqueue(enc.encode(`event: ${name}\ndata: ${JSON.stringify(data)}\n\n`)), signal };
+      signal.addEventListener("abort", () => { try { ctl.error(new DOMException("aborted", "AbortError")); } catch { /* closed */ } });
+      t.streams.push(s);
+      return { status: 200, ok: true, body, headers: { get: () => "text/event-stream" } };
+    };
+    return t;
+  }
+  const settle = (ms = 30) => act(async () => { await new Promise((r) => setTimeout(r, ms)); });
+
+  it("the stream's ended: onEnded at once, why in plain words, back to sign-in", async () => {
+    const tr = streamingTransport();
+    const ended = [];
+    let signIns = 0;
+    const el = await render(
+      <QAuthScreens transport={tr}><IdleWarning sessionId="s9" onEnded={(r) => ended.push(r)} onSignOut={() => {}} onSignIn={() => signIns++} returnAfterSeconds={1} /></QAuthScreens>,
+    );
+    expect(tr.calls).toContainEqual(["STREAM", "/v1/me/sessions/s9/events"]);
+    await act(async () => { tr.streams[0].push("ready", { heartbeatSeconds: 25 }); tr.streams[0].push("ended", { reason: "signed_out" }); });
+    await settle();
+    expect(ended).toEqual(["signed_out"]);
+    expect(document.body.textContent).toContain("You were signed out from another device.");
+    expect(tr.streams[0].signal.aborted).toBe(true);
+    const again = [...document.querySelectorAll("button")].find((b) => b.textContent === "Sign in again");
+    await act(async () => { again.click(); });
+    expect(signIns).toBe(1);
+    await settle(1100);
+    expect(signIns).toBe(2); // and by itself after returnAfterSeconds
+    el.remove();
+  });
+
+  it("in Arabic, with the reason", async () => {
+    const tr = streamingTransport();
+    const el = await render(
+      <QAuthScreens transport={tr} locale="ar"><IdleWarning sessionId="s9" onEnded={() => {}} onSignOut={() => {}} onSignIn={() => {}} returnAfterSeconds={0} /></QAuthScreens>,
+    );
+    await act(async () => { tr.streams[0].push("ended", { reason: "suspended" }); });
+    await settle();
+    expect(document.body.textContent).toContain("تم إيقاف حسابك.");
+    el.remove();
+  });
+
+  it("without onSignIn no notice: onEnded does it all", async () => {
+    const tr = streamingTransport();
+    const ended = [];
+    const el = await render(<QAuthScreens transport={tr}><IdleWarning sessionId="s9" onEnded={(r) => ended.push(r)} onSignOut={() => {}} /></QAuthScreens>);
+    await act(async () => { tr.streams[0].push("ended", { reason: "replaced" }); });
+    await settle();
+    expect(ended).toEqual(["replaced"]);
+    expect(el.textContent).not.toContain("You were signed out");
+    el.remove();
+  });
+
+  it("the default transport streams through the proxy's path", async () => {
+    const seen = [];
+    const tr = createTransport("/qauth", async (url, init) => (seen.push([url, init.headers.accept, init.credentials]), new Response("", { status: 503 })));
+    const ac = new AbortController();
+    await tr.stream("/v1/me/sessions/s9/events", ac.signal);
+    expect(seen).toEqual([["/qauth/v1/me/sessions/s9/events", "text/event-stream", "same-origin"]]);
+  });
+});
