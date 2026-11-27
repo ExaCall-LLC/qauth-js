@@ -84,6 +84,12 @@ Change any text with `messages={{ "account.title": "Security" }}`.
 
 ## Changes
 
+- **0.13.1** (2026-11-27): `RecentActivity` names `passkey.added` (a passkey added on qAuth's page from your app) "Passkey added" (qAuth EXA-625).
+- **0.13.0** (2026-11-26): `MyAccount`'s changes to how the person signs in, from your app's page without a recent
+  sign-in, answer 403 `FRESH_SIGN_IN_REQUIRED` (qAuth EXA-489): the screens say so in plain words and offer "Sign in
+  again" when you pass `onSignInAgain` to `<QAuthScreens>` (send the person to your sign-in, then back). Personal
+  tokens are made only in qAuth's own My account: `MyTokens` lists and revokes them and says where they're made;
+  "New token" shows only with `canCreate` (`MyAccount`'s `createTokens`), for qAuth's own apps.
 - **0.12.0** (2026-11-26): "Confirm it's you" in `MyAccount`: a change to second steps runs at once and asks to
   confirm only when qAuth answers `CONFIRM_NEEDED`, in a small dialog with just what the person has (their password,
   plus a code when they have an authenticator app, or an existing passkey alone), the email shown read-only; never a

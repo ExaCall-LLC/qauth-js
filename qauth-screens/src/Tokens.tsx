@@ -166,8 +166,12 @@ function NewToken({ orgs, onDone }: { orgs: MyOrg[]; onDone: () => void }) {
   );
 }
 
-/** The person's personal access tokens: make one (a subset of their own permissions), see and revoke them. */
-export function MyTokens() {
+/**
+ * The person's personal access tokens: see and revoke them; make one (a
+ * subset of their own permissions) only with canCreate, in qAuth's own My
+ * account: qAuth refuses a product's token (EXA-489).
+ */
+export function MyTokens({ canCreate = false }: { canCreate?: boolean } = {}) {
   const { t, api, locale } = useScreens();
   const list = useLoad<Token[]>("/v1/me/tokens");
   const orgs = useLoad<MyOrg[]>("/v1/me/orgs");
@@ -198,7 +202,7 @@ export function MyTokens() {
   return (
     <Section title={t("tokens.title")} hint={t("tokens.hint")}>
       <Note msg={msg} />
-      <div><NewToken orgs={orgs.data ?? []} onDone={list.reload} /></div>
+      {canCreate ? <div><NewToken orgs={orgs.data ?? []} onDone={list.reload} /></div> : <p style={{ margin: 0, fontSize: 13, opacity: 0.75 }}>{t("tokens.ownOnly")}</p>}
       {rows.length ? <Table<Token> data={rows} columns={cols} getRowId={(r) => r.id} loading={list.loading} /> : null}
     </Section>
   );

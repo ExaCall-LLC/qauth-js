@@ -65,7 +65,10 @@ export type Proof = { password?: string; code?: string; passkey?: unknown; phone
  * runs it again with that proof. Never asks to set anything up.
  */
 export function useConfirm(): { confirm: <T>(run: (p?: Proof) => Promise<T>, title?: string) => Promise<T | undefined>; dialog: ReactNode } {
-  const { t, api } = useScreens();
+  const { t, api, onSignInAgain } = useScreens();
+  // FRESH_SIGN_IN_REQUIRED: from a product's page, changes to how the
+  // person signs in need a recent sign-in (qAuth's rule, EXA-489)
+  const [fresh, setFresh] = useState(false);
   const [state, setState] = useState<{ needs: ConfirmNeeds; title?: string; run: (p: Proof) => Promise<void>; cancel: () => void } | null>(null);
   const [password, setPassword] = useState("");
   const [code, setCode] = useState("");
@@ -75,6 +78,10 @@ export function useConfirm(): { confirm: <T>(run: (p?: Proof) => Promise<T>, tit
   const [busy, setBusy] = useState(false);
   const confirm = useCallback(<T,>(run: (p?: Proof) => Promise<T>, title?: string): Promise<T | undefined> => {
     return run().catch((e) => {
+      if (e instanceof ScreenError && e.code === "FRESH_SIGN_IN_REQUIRED") {
+        setFresh(true);
+        return undefined;
+      }
       if (!(e instanceof ScreenError) || e.code !== "CONFIRM_NEEDED") throw e;
       return new Promise<T | undefined>((resolve, reject) => {
         setPassword(""), setCode(""), setPhoneCode(""), setSentTo(""), setErr(null);
@@ -88,6 +95,12 @@ export function useConfirm(): { confirm: <T>(run: (p?: Proof) => Promise<T>, tit
               setState(null);
               resolve(out);
             } catch (e2) {
+              if (e2 instanceof ScreenError && e2.code === "FRESH_SIGN_IN_REQUIRED") {
+                setState(null);
+                setFresh(true);
+                resolve(undefined);
+                return;
+              }
               if (e2 instanceof ScreenError && e2.code === "CONFIRM_NEEDED") {
                 setState((st) => (st ? { ...st, needs: e2.data as ConfirmNeeds } : st));
                 setErr(t("confirm.more"));
@@ -171,5 +184,11 @@ export function useConfirm(): { confirm: <T>(run: (p?: Proof) => Promise<T>, tit
       ) : null}
     </Dialog>
   );
-  return { confirm, dialog };
+  const freshDialog = (
+    <Dialog open={fresh} onOpenChange={(o) => { if (!o) setFresh(false); }} title={t("fresh.title")}
+      footer={onSignInAgain ? <Button variant="primary" onClick={() => { setFresh(false); onSignInAgain(); }}>{t("ended.signIn")}</Button> : null}>
+      <p style={{ margin: 0 }}>{t("fresh.body")}</p>
+    </Dialog>
+  );
+  return { confirm, dialog: <>{dialog}{freshDialog}</> };
 }

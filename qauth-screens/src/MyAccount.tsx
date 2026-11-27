@@ -36,6 +36,12 @@ export interface MyAccountProps {
   /** Personal access tokens. Default true. */
   tokens?: boolean;
   /**
+   * "New token" in the personal tokens section. Only qAuth's own My account
+   * (the Console, the Portal) makes personal tokens; inside your app the
+   * section lists and revokes them and says where they are made. Default false.
+   */
+  createTokens?: boolean;
+  /**
    * Shows "Add a passkey" where qAuth can't make one on this page (your
    * app sends the person to its sign-in pages). Where it can
    * (`passkeysHere`, e.g. qAuth's own Console and Portal), "Add a
@@ -47,7 +53,7 @@ export interface MyAccountProps {
 }
 
 /** The signed-in person's account: password, second steps, recovery codes, sessions. */
-export function MyAccount({ title, sessions = true, activity = true, tokens = true, onAddPasskey, children }: MyAccountProps = {}) {
+export function MyAccount({ title, sessions = true, activity = true, tokens = true, createTokens = false, onAddPasskey, children }: MyAccountProps = {}) {
   const { t } = useScreens();
   const sec = useLoad<Security>("/v1/me/security");
   if (sec.loading && !sec.data) return <p>{t("common.loading")}</p>;
@@ -69,7 +75,7 @@ export function MyAccount({ title, sessions = true, activity = true, tokens = tr
       {s.authenticator || s.phone ? <RecoverySection left={s.recoveryCodes} reload={sec.reload} /> : null}
       {sessions ? <SessionsSection /> : null}
       {activity ? <RecentActivity /> : null}
-      {tokens ? <MyTokens /> : null}
+      {tokens ? <MyTokens canCreate={createTokens} /> : null}
     </div>
   );
 }

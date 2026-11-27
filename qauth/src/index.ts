@@ -142,8 +142,8 @@ export interface NewSubOrg {
   /** @deprecated The old single level: refused when set. Give `levels`. */
   levelId?: string;
   /**
-   * Email the first admin (a new account's one-time password goes in the
-   * email). Always on for a new account when an organization creates its
+   * Email the first admin (a new account gets a single-use link to choose its
+   * password; no password in the email or the answer). Always on for a new account when an organization creates its
    * child: it never sees a password. Your tenant needs a default email channel.
    */
   invite?: boolean;
@@ -227,7 +227,11 @@ export interface NewMember {
   role?: Role;
   /** Roles to give at once (ids from `givableRoles()`); you can't give more than you hold. */
   roleIds?: string[];
-  /** Email the person through your tenant's own email channel. */
+  /**
+   * Email the person through your tenant's own email channel: a new account
+   * gets a single-use link (7 days) to choose its password, never a password;
+   * an existing account a note that it joined.
+   */
   invite?: boolean;
 }
 
@@ -472,6 +476,14 @@ export interface ApiKey {
   createdAt: string;
   expiresAt?: string;
   revokedAt?: string;
+  /** The app whose token minted the key on the organization API; null for keys made in qAuth's Console or Portal. */
+  createdVia?: KeyCreatedVia | null;
+}
+
+/** The product that minted a key: its app and the OAuth client_id of the person's token. */
+export interface KeyCreatedVia {
+  appId: string;
+  clientId: string;
 }
 
 export interface NewApiKey {
@@ -486,7 +498,18 @@ export interface NewApiKey {
   scopes?: string[];
   /** App ids the key is for; the org must be able to use each of them. */
   apps?: string[];
+  /**
+   * Required when your app mints the key (the organization API): at most the
+   * API's limit (default 90 days), else 422.
+   */
   expiresAt?: string;
+  /**
+   * The person confirms it's them (403 CONFIRM_NEEDED says which to ask):
+   * their password, plus a code from their authenticator app or by SMS.
+   */
+  password?: string;
+  code?: string;
+  phoneCode?: string;
 }
 
 /** One API's permissions a person may put in a personal token. */
@@ -1051,6 +1074,7 @@ export class PersonClient {
     list: (): Promise<Page<ApiKey>> => this.t.list("/v1/me/tokens"),
     /** Per API: the permissions the person can put in a token for this org. */
     choices: (orgId: string): Promise<Page<TokenChoice>> => this.t.list("/v1/me/token-choices", { org: orgId }),
+    /** Only from qAuth's own My account (Console, Portal): your app's token gets 403, even right after a sign-in. */
     create: (tk: NewPersonalToken): Promise<MintedApiKey> => this.t.call("POST", "/v1/me/tokens", tk),
     revoke: (tokenId: string): Promise<{ removed: boolean }> => this.t.call("DELETE", `/v1/me/tokens/${seg(tokenId)}`),
   };
@@ -1084,6 +1108,15 @@ export class PersonClient {
    * authenticator app or a phone, removing a passkey, new recovery codes)
    * needs the person to confirm it's them (Proof); never a set-up first.
    * Wrong proofs count toward the account's lockout.
+   *
+   * Changes to how the person signs in (password, authenticator app, phone,
+   * passkeys, recovery codes) with your app's token also
+   * need a recent sign-in to your app with their own credentials (the
+   * platform's freshSignInMinutes) or a step-up there: else 403
+   * FRESH_SIGN_IN_REQUIRED (send them to sign in again, then retry). A
+   * password in the request never stands in for it, and the token must be
+   * a JWT access token (opaque tokens can't). Reads and sign-outs are not
+   * affected.
    */
   readonly account = {
     security: (): Promise<MySecurity> => this.t.call("GET", "/v1/me/security"),
@@ -1313,6 +1346,10 @@ export interface SessionSettings {
   skipCompanyByDomain: boolean;
   /** When a reused shared sign-in asks a quick check: minutes without activity, always, never, or the tenant's default. */
   reverifyOnReuse: ReverifyOnReuse;
+  /** The app's pages may embed qAuth's add-a-passkey page (see addPasskey; off by default). */
+  embedPasskeyPage: boolean;
+  /** Development only: localhost origins of the redirect URIs may embed it too (off by default). */
+  embedPasskeyDevOrigins: boolean;
 }
 
 /** Minutes (1 to 1440) without activity in the browser, or "always" | "never" | "default" (the tenant's rule). */
@@ -1415,6 +1452,8 @@ export interface KeyCheck {
     /** What it may do, worked out live: API id -> permission keys. */
     permissions?: Record<string, string[]>;
     expiresAt?: string | null;
+    /** The app whose token minted the key; null for keys made in qAuth's Console or Portal. */
+    createdVia?: KeyCreatedVia | null;
   };
 }
 
@@ -1668,6 +1707,7 @@ export { qauthProxy, type ProxyOptions } from "./proxy.js";
 export { Verifier, bearerToken, errorResponse, identityOf, type VerifierOptions, type Identity, type ConnectMiddleware, type MiddlewareRequest, type MiddlewareResponse } from "./verify.js";
 export { TokenErrorCode, parseRetryAfter } from "./errors.js";
 export { startDeviceSignIn, pollDeviceToken, pairDevice, type DeviceSignIn, type DeviceSignInOptions, type DeviceTokens } from "./device.js";
+export { addPasskey, addPasskeyUrl, signInOrigin, type AddPasskeyOptions, type AddPasskeyResult, type AddPasskeyMode } from "./addpasskey.js";
 export { watchIdle, sessionIdOf, type IdleWatch, type IdleWatchOptions, type IdleSource, type IdleWarning, type SessionState, type SessionEnd, type StreamResponse } from "./idle.js";
 
 export default QAuth;

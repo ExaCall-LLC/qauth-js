@@ -227,6 +227,55 @@ describe("screens render", () => {
     expect(document.querySelector('[role="dialog"]')).toBeNull();
   });
 
+  it("a change from a product's page without a recent sign-in asks to sign in again (FRESH_SIGN_IN_REQUIRED)", async () => {
+    const tr = fakeTransport({
+      "/v1/me/security": { email: "a@b.test", hasPassword: true, companyManaged: false, authenticator: false, recoveryCodes: 0, passkeys: [], offered: { authenticator: true, phone: false } },
+    });
+    tr.send = async (m, p, b) => {
+      tr.calls.push([m, p, b]);
+      if (p === "/v1/me/authenticator") throw new ScreenError(403, "FRESH_SIGN_IN_REQUIRED", "Sign in again, then try again.");
+      return {};
+    };
+    let signIns = 0;
+    const el = await render(<QAuthScreens transport={tr} onSignInAgain={() => signIns++}><MyAccount sessions={false} tokens={false} activity={false} /></QAuthScreens>);
+    await act(async () => button(el, "Set up").click());
+    await act(async () => { await new Promise((r) => setTimeout(r, 20)); });
+    const dialog = document.querySelector('[role="dialog"]');
+    expect(dialog.textContent).toContain("Sign in again to make this change");
+    expect(dialog.querySelector('input[type="password"]')).toBeNull();
+    await act(async () => [...dialog.querySelectorAll("button")].find((b) => b.textContent === "Sign in again").click());
+    expect(signIns).toBe(1);
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+  });
+
+  it("FRESH_SIGN_IN_REQUIRED outside the confirm dialog (a password change) is said in the screens' words; an inline onSignInAgain never reloads", async () => {
+    const tr = fakeTransport({
+      "/v1/me/security": { email: "a@b.test", hasPassword: true, companyManaged: false, authenticator: false, recoveryCodes: 0, passkeys: [], offered: { authenticator: true, phone: false } },
+    });
+    tr.send = async (m, p) => {
+      if (p === "/v1/me/password") throw new ScreenError(403, "FRESH_SIGN_IN_REQUIRED", "server words");
+      return {};
+    };
+    const el = document.createElement("div");
+    document.body.appendChild(el);
+    const root = createRoot(el);
+    const ui = () => <QAuthScreens transport={tr} locale="ar" onSignInAgain={() => {}}><MyAccount sessions={false} tokens={false} activity={false} /></QAuthScreens>;
+    await act(async () => { root.render(ui()); });
+    await act(async () => { await new Promise((r) => setTimeout(r, 20)); });
+    const gets = tr.calls.filter((c) => c[0] === "GET").length;
+    await act(async () => { root.render(ui()); }); // a new arrow each render
+    await act(async () => { await new Promise((r) => setTimeout(r, 20)); });
+    expect(tr.calls.filter((c) => c[0] === "GET").length).toBe(gets);
+    const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
+    await act(async () => {
+      for (const i of el.querySelectorAll('input[type="password"]')) { set.call(i, "Pw-123456789!"); i.dispatchEvent(new Event("input", { bubbles: true })); }
+    });
+    await act(async () => [...el.querySelectorAll("button")].find((b) => b.textContent === "تغيير كلمة المرور" || b.className.includes("primary") || b.getAttribute("data-variant") === "primary").click());
+    await act(async () => { await new Promise((r) => setTimeout(r, 20)); });
+    expect(el.textContent).toContain("لحمايتك");
+    expect(el.textContent).not.toContain("server words");
+  });
+
   it("someone whose second step is their phone confirms with the password and a code by SMS", async () => {
     const tr = fakeTransport({
       "/v1/me/security": { email: "p@b.test", hasPassword: true, companyManaged: false, authenticator: false, phone: "+966•••••0001", recoveryCodes: 0, passkeys: [], offered: { authenticator: true, phone: true } },
@@ -310,6 +359,16 @@ describe("screens render", () => {
     expect(el.textContent).toContain("Approved");
   });
 
+  it("MyTokens inside a product: no New token, the reason in plain words (EN + AR); revoking stays", async () => {
+    const routes = { "/v1/me/tokens": [{ id: "t1", name: "Script", orgId: "o1", permissions: [] }], "/v1/me/orgs": [{ id: "o1", name: "Shop" }] };
+    const el = await render(<QAuthScreens transport={fakeTransport(routes)}><MyTokens /></QAuthScreens>);
+    expect([...el.querySelectorAll("button")].some((b) => b.textContent === "New token")).toBe(false);
+    expect(el.textContent).toContain("new tokens are made in qAuth's own My account");
+    expect([...el.querySelectorAll("button")].some((b) => b.textContent === "Revoke")).toBe(true);
+    const ar = await render(<QAuthScreens transport={fakeTransport(routes)} locale="ar"><MyTokens /></QAuthScreens>);
+    expect(ar.textContent).toContain("لحمايتك، تُنشأ الرموز الجديدة");
+  });
+
   it("MyTokens makes a personal token from the person's own permissions, a group ticking all of them", async () => {
     const tr = fakeTransport({
       "/v1/me/tokens": [],
@@ -320,7 +379,7 @@ describe("screens render", () => {
       ] }],
     });
     tr.send = async (m, p, b) => { tr.calls.push([m, p, b]); return { secret: "qak_secret" }; };
-    const el = await render(<QAuthScreens transport={tr}><MyTokens /></QAuthScreens>);
+    const el = await render(<QAuthScreens transport={tr}><MyTokens canCreate /></QAuthScreens>);
     expect(el.textContent).toContain("Personal access tokens");
     await act(async () => button(el, "New token").click());
     await act(async () => { await new Promise((r) => setTimeout(r, 20)); });

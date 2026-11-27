@@ -143,14 +143,22 @@ test("branding and the sign-in page design: set, read, picture, reset", async ()
 
 test("API keys: create (secret once), list, validate, revoke", async () => {
   const q = qauth();
-  const org = q.as("shop-admin-token").org(seed.shop);
-  const minted = await org.apiKeys.create({ name: "Billing sync", apps: [seed.app] });
+  // with an app's token: a fresh sign-in, the person's password, an end date (EXA-627)
+  await assert.rejects(q.as("shop-admin-token").org(seed.shop).apiKeys.create({ name: "Stale", apps: [seed.app] }),
+    (e) => e.status === 403 && e.code === "FRESH_SIGN_IN_REQUIRED");
+  const org = q.as(seed.freshTokens["shop-admin"]).org(seed.shop);
+  const in30 = new Date(Date.now() + 30 * 86400000).toISOString();
+  await assert.rejects(org.apiKeys.create({ name: "Billing sync", apps: [seed.app], expiresAt: in30 }), (e) => e.status === 403 && e.code === "CONFIRM_NEEDED");
+  await assert.rejects(org.apiKeys.create({ name: "Billing sync", apps: [seed.app], password: "Pass-shop-admin-1!" }), (e) => e.status === 422);
+  const minted = await org.apiKeys.create({ name: "Billing sync", apps: [seed.app], expiresAt: in30, password: "Pass-shop-admin-1!" });
   assert.ok(minted.secret.length > 20);
   assert.equal(minted.key.name, "Billing sync");
+  assert.deepEqual(minted.key.createdVia, { appId: seed.app, clientId: "cid-fresh" });
   assert.ok(!JSON.stringify(await org.apiKeys.list()).includes(minted.secret));
   const ok = await q.validateKey(minted.secret, { app: seed.app });
   assert.equal(ok.valid, true);
   assert.equal(ok.key.orgId, seed.shop);
+  assert.deepEqual(ok.key.createdVia, { appId: seed.app, clientId: "cid-fresh" });
   assert.equal((await q.validateKey(minted.secret, { app: "another-app" })).valid, false);
   await org.apiKeys.revoke(minted.key.id);
   assert.equal((await q.validateKey(minted.secret)).valid, false);
@@ -158,9 +166,9 @@ test("API keys: create (secret once), list, validate, revoke", async () => {
 
 test("API keys hold permissions; validateKey says what a key may do", async () => {
   const q = qauth();
-  const org = q.as("shop-admin-token").org(seed.shop);
-  const in3 = new Date(Date.now() + 90 * 86400000).toISOString();
-  const minted = await org.apiKeys.create({ name: "Contacts sync", permissions: [seed.permission], expiresAt: in3 });
+  const org = q.as(seed.freshTokens["shop-admin"]).org(seed.shop);
+  const in3 = new Date(Date.now() + 89 * 86400000).toISOString();
+  const minted = await org.apiKeys.create({ name: "Contacts sync", permissions: [seed.permission], expiresAt: in3, password: "Pass-shop-admin-1!" });
   assert.deepEqual(minted.key.permissions, [seed.permission]);
   const check = await q.validateKey(minted.secret);
   assert.equal(check.valid, true);
@@ -173,12 +181,15 @@ test("API keys hold permissions; validateKey says what a key may do", async () =
 
 test("personal access tokens: a subset of the person's own permissions", async () => {
   const q = qauth();
+  // minting is qAuth's own My account's only (EXA-489): a product's token is refused, even right after a sign-in
+  for (const tok of ["shop-member-token", seed.freshTokens["shop-member"]]) {
+    await assert.rejects(q.as(tok).tokens.create({ orgId: seed.shop, name: "x", permissions: [seed.permission] }), (e) => e.status === 403 && /qAuth's own My account/.test(e.message));
+  }
   const me = q.as("shop-member-token");
   const choices = (await me.tokens.choices(seed.shop)).items;
   assert.equal(choices.length, 1);
   assert.deepEqual(choices[0].permissions.map((p) => p.key), ["contacts:read"]);
-  const t = await me.tokens.create({ orgId: seed.shop, name: "My script", permissions: [seed.permission] });
-  assert.equal(t.key.kind, "pat");
+  const t = { key: { id: seed.pat.id }, secret: seed.pat.secret }; // made in qAuth's My account (the test server)
   const check = await q.validateKey(t.secret);
   assert.equal(check.key.kind, "pat");
   assert.equal(keyMay(check, seed.api, "contacts:read"), true);
@@ -320,7 +331,9 @@ test("company sign-in: not connected, needs a verified domain, admins only", asy
 });
 
 test("my account: security, password, authenticator with proof, recovery codes, sessions", async () => {
-  const me = qauth().as("shop-admin-token");
+  // changes to how they sign in need a recent sign-in to the product (EXA-489)
+  await assert.rejects(qauth().as("shop-admin-token").account.changePassword("Pass-shop-admin-1!", "Brand-new-pass-1!"), (e) => e.status === 403 && e.code === "FRESH_SIGN_IN_REQUIRED");
+  const me = qauth().as(seed.freshTokens["shop-admin"]);
   const sec = await me.account.security();
   assert.equal(sec.hasPassword, true);
   assert.equal(sec.authenticator, false);

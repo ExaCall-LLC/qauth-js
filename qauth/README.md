@@ -346,6 +346,53 @@ clock doesn't matter. While the stream is down it reconnects with backoff and as
 every `pollSeconds` (option; else qAuth's; else 45). `qauthProxy` passes the stream through
 unbuffered. `@isdlc.ai/qauth-screens` has it ready as `<IdleWarning>`.
 
+## Add a passkey from your app
+
+People can add another passkey without leaving your page. `addPasskey` (browser code) opens qAuth's
+"Add a passkey" page on your app's **sign-in host**, the address its sign-in page opens on, where its
+passkeys live. The page opens in a frame over your page, or in a pop-up where the browser refuses passkeys
+in a cross-site frame (Firefox). It resolves with what happened:
+
+```ts
+import { addPasskey } from "@isdlc.ai/qauth";
+
+async function onAddPasskeyClick() {
+  const r = await addPasskey({ signInHost: "sadeem.id.qapps.dev", clientId: "your-client-id" }); // mode: "auto" | "iframe" | "popup"
+  if (r.result === "added") console.log(`Passkey added: ${r.name}`); // "cancelled" | "error": nothing changed
+}
+```
+
+**Why your app can't make the passkey itself.** The browser makes a passkey for the site it is on, and
+qAuth checks the browser's answer: the challenge it handed out (single use, a few minutes), the ceremony,
+the origin (the sign-in host) and the authenticator's attestation. If your page ran the ceremony and your
+server passed the answer to qAuth, qAuth could not tell a forged answer from a real one. So the ceremony
+runs only on qAuth's page, and your app only hears the result. It never sees the options or the answer.
+
+- **Turn it on:** the app's "Let this app embed the add-a-passkey page" switch (Console › the app ›
+  Sign-in), or `embedPasskeyPage: true` in `qauth.app.yaml` (turning it on is marked "weakens security"). It
+  is off by default, and organizations can't turn it on.
+- **Which pages:** only the `https` origins (on real hosts) of the client's registered redirect URIs. qAuth sends
+  `Content-Security-Policy: frame-ancestors <that origin>` and refuses every other origin. For local development,
+  the app's "Also from localhost" switch (`embedPasskeyDevOrigins: true`) lets its `localhost`, `127.x` and `::1`
+  redirect URIs in too (`http` allowed there). Leave it off in production.
+- **Who:** the person confirms it's them on qAuth's page, in the same frame: their password plus their
+  authenticator code when they have one, or an existing passkey alone. A proof stays good for the platform's
+  `freshSignInMinutes` on that host. Your app's tokens are never accepted there. Someone whose only second
+  step is a code by phone adds passkeys when they next sign in.
+- **The result:** the page posts `{ type: "qauth.passkey", result: "added" | "cancelled" | "error", name? }`
+  to your origin only (never `*`), and `addPasskey` takes it only from the sign-in host's origin. It carries
+  no secrets and no ids, just the new passkey's display name.
+- **After it:** the passkey has the same home as passkeys made at sign-in, so it signs in there. Its name says
+  where it came from ("Sadeem Console · Mac · 2026-11-28"). The activity log has `passkey.added`: `origin` when
+  the browser confirmed your page as the frame's top page, else `requestedOrigin` (a pop-up's opener isn't
+  checked). The person gets an email ("…on a page opened for <app>").
+- In `auto` mode, when the frame reports `error` (the browser couldn't make the passkey there, or named no top
+  page), `addPasskey` opens the pop-up once instead. `iframe` mode resolves `error`.
+- The page shows the account the passkey is for, and takes only its own forms (`Origin` must be the sign-in host).
+- Call `addPasskey` from a click: browsers block pop-ups opened later. If you build the frame yourself, give it
+  `allow="publickey-credentials-create; publickey-credentials-get"` and open
+  `https://<sign-in host>/ui/passkeys/add?client_id=…&origin=<your page's origin>` (add `&mode=popup` for a pop-up).
+
 ## Errors
 
 Every refusal is a `QAuthError` with:
@@ -381,6 +428,14 @@ A "this device" marker in the session list (tokens don't name their session).
 
 ## Changes
 
+- **0.28.0** (2026-11-28): `addPasskey({ signInHost, clientId, mode })` (browser): people add another passkey without
+  leaving your page. It opens qAuth's "Add a passkey" page on your app's sign-in host in a frame (or a pop-up in
+  Firefox), and resolves `{ result: "added" | "cancelled" | "error", name? }`, taking the result only from the sign-in
+  host's origin. The app's `embedPasskeyPage` setting must be on. `SessionSettings.embedPasskeyPage` and
+  `embedPasskeyDevOrigins` (localhost origins, development only) are new (qAuth EXA-625).
+- **0.27.0** (2026-11-27): minting or revoking an organization's API key with your app's token (`apiKeys.create`, `apiKeys.revoke`) needs a recent sign-in to your app (the platform's `freshSignInMinutes`) or a step-up there, else 403 `FRESH_SIGN_IN_REQUIRED`; minting then asks the person to confirm it's them (`password`, `code`, `phoneCode`; 403 `CONFIRM_NEEDED`). Your app revokes only keys it minted (a Console key or another app's: 403). The key may use only your app's own APIs (403 otherwise), never qAuth's `qauth:org:*` scopes (403: make those in the Console), and `expiresAt` is required, at most the API's limit (default 90 days; 422). Keys carry `createdVia` (`appId`, `clientId`; null for Console keys), also in `validateKey` (qAuth EXA-627).
+- **0.26.3** (2026-11-26): comments only: `invite` on adding a member or creating a child now says what qAuth does: a new account is emailed a single-use link (7 days) to choose its password; no password is ever emailed or returned.
+- **0.26.2** (2026-11-26): docs only: changes to how the person signs in (password, authenticator app, phone, passkeys, recovery codes) made with your app's token need a recent sign-in to your app with their own credentials (the platform's `freshSignInMinutes`) or a step-up there, else 403 `FRESH_SIGN_IN_REQUIRED`: send them to sign in again, then retry. A password in the request never stands in for it, and the token must be a JWT access token (opaque tokens can't). Personal tokens are made only in qAuth's own My account (Console, Portal): `tokens.create` with your app's token gets 403; list and revoke still work. Reads and sign-outs are not affected (qAuth EXA-489).
 - **0.26.1** (2026-11-26): each API has its own list of levels: `LevelRef` and `levels` name that API's levels; `Org.levelId` is always empty (deprecated) and `NewSubOrg.levelId` is refused when set (give `levels`); `levelName` is the organization's level name when it is the same in every API. `MyOrg.internalByLevel` says one of its levels is internal (`isInternal` stays its own flag).
 - **0.26.0** (2026-11-26): "confirm it's you", one rule for every change to second steps: `authenticator.start(proof)`
   and `phone.add(phone, proof)` take a proof now; a person with an authenticator app confirms with their password and a
