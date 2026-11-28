@@ -749,6 +749,26 @@ export interface QAuthOptions {
 /** The qAuth API hosts trusted by default as an issuer's `qauth_api`. */
 export const DEFAULT_TRUSTED_API_HOSTS: readonly string[] = ["auth.qapps.dev"];
 
+/** The person's browser, for calls your server makes for them (QAuth.as). Both fields are optional. */
+export interface BrowserDetails {
+  /** Their browser's User-Agent (header X-QAuth-Client-UA). */
+  userAgent?: string;
+  /** Their browser's address (header X-QAuth-Client-IP; ignored by qAuth when it doesn't parse). */
+  ip?: string;
+}
+
+/** The headers for BrowserDetails: control characters dropped, at most 512 characters each. */
+export function browserHeaders(b?: BrowserDetails): Record<string, string> {
+  const out: Record<string, string> = {};
+  // eslint-disable-next-line no-control-regex
+  const clean = (v?: string) => (v ?? "").replace(/[\u0000-\u001f\u007f-\u009f]/g, "").slice(0, 512).trim();
+  for (const [k, v] of [["x-qauth-client-ua", b?.userAgent], ["x-qauth-client-ip", b?.ip]] as const) {
+    const c = clean(v);
+    if (c) out[k] = c;
+  }
+  return out;
+}
+
 /** qAuth's API address: fixed, or read from the issuer's discovery. */
 type Base = string | (() => Promise<string>);
 
@@ -1623,10 +1643,14 @@ export class QAuth {
     return doc.qauth_api.replace(/\/+$/, "");
   }
 
-  /** Act as the signed-in person, with their access token. */
-  as(accessToken: string): PersonClient {
+  /**
+   * Act as the signed-in person, with their access token. `browser` (optional, for calls your server makes for
+   * them): `userAgent` and `ip`, their browser's (not your server's), for the passkey's name, the notice email,
+   * the audit and the step's limits. They never grant access.
+   */
+  as(accessToken: string, browser?: BrowserDetails): PersonClient {
     if (!accessToken) throw new Error("QAuth.as: the person's access token is required");
-    return new PersonClient(new Transport(this.base, this.f, this.timeoutMs, { authorization: `Bearer ${accessToken}` }));
+    return new PersonClient(new Transport(this.base, this.f, this.timeoutMs, { ...browserHeaders(browser), authorization: `Bearer ${accessToken}` }));
   }
 
   /**

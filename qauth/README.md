@@ -386,6 +386,11 @@ async function onAddPasskeyClick(accessToken: string) {
   `qauth.as(token).account.passkeys.begin({ origin })` and `.finish({ origin, ceremony, credential })`
   (and `.step` / `.verifyStep`), passing the options and the browser's answer through
   (`decodeOptions` / `encodeCredential` convert them).
+- **Signed in twice?** Nothing to do: qAuth ties each access token to its own sign-in when it issues it.
+- **Calling from your server?** Pass the person's browser too: `qauth.as(token, { userAgent, ip })` (headers
+  `X-QAuth-Client-UA`, `X-QAuth-Client-IP`). The passkey's name, the notice email and the audit then show their
+  browser (marked app-supplied), and the step's code and lockout counts are theirs, not your server's. They never
+  grant access.
 - **After it:** the activity log has `passkey.added` (app, origin, path), and the person is emailed a notice
   with a link to remove it.
 - `addPasskey` (the embedded qAuth page of 0.28.0) is removed: use `createPasskey`.
@@ -425,6 +430,9 @@ A "this device" marker in the session list (tokens don't name their session).
 
 ## Changes
 
+- **0.30.0** (2026-11-28): `qauth.as(token, { userAgent, ip })` (`BrowserDetails`, optional) sends the person's browser
+  (`X-QAuth-Client-UA`, `X-QAuth-Client-IP`) on every call, for the passkey's name, the notice email, the audit and the
+  inline step's limits; never for access (qAuth EXA-640).
 - **0.29.0** (2026-11-28): **breaking:** `addPasskey` (the embedded qAuth page) is removed. `createPasskey({ apiBase, accessToken })`
   (browser): add a passkey on your own page (begin/finish through qAuth's API; qAuth's pop-up on the tenant's passkey home where the
   browser has no related origins, Firefox); the inline check `confirmWithPasskey`, `startPasskeyStep`, `verifyPasskeyStep`

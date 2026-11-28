@@ -545,3 +545,16 @@ test("app-page passkeys: the server helpers reach qAuth and keep its codes", asy
   await assert.rejects(q.as(seed.freshTokens["shop-admin"]).account.passkeys.begin({ origin: "https://omni.test" }),
     (e) => e instanceof QAuthError && e.status === 403 && e.code === "PASSKEYS_OFF");
 });
+
+test("app-page passkeys: STEP_NEEDED keeps the server's ways; the code step then passes (EXA-639)", async () => {
+  const pk = qauth().as(seed.stepToken).account.passkeys;
+  const origin = seed.stepOrigin;
+  const err = await pk.begin({ origin }).then(() => null, (e) => e);
+  assert.ok(err instanceof QAuthError && err.status === 403 && err.code === "STEP_NEEDED", String(err));
+  assert.deepEqual(err.data, { ways: ["code"], passkeyAddFreshness: "session" });
+  assert.equal((await pk.step({ origin, way: "code" })).way, "code");
+  await assert.rejects(pk.verifyStep({ origin, way: "code", code: "000000" }), QAuthError);
+  assert.equal((await pk.verifyStep({ origin, way: "code", code: "123456" })).confirmed, true);
+  // fresh now (the test server has no passkey engine: 503)
+  await assert.rejects(pk.begin({ origin }), (e) => e instanceof QAuthError && e.status === 503);
+});
