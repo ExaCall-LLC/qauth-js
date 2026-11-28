@@ -539,3 +539,9 @@ test("instant sign-out: watchIdle on qAuth's stream ends the moment the session 
   assert.ok(Date.now() - start < 1000, `ended after ${Date.now() - start} ms`);
   w.stop();
 });
+
+test("app-page passkeys: the server helpers reach qAuth and keep its codes", async () => {
+  const q = qauth();
+  await assert.rejects(q.as(seed.freshTokens["shop-admin"]).account.passkeys.begin({ origin: "https://omni.test" }),
+    (e) => e instanceof QAuthError && e.status === 403 && e.code === "PASSKEYS_OFF");
+});

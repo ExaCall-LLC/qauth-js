@@ -348,50 +348,47 @@ unbuffered. `@isdlc.ai/qauth-screens` has it ready as `<IdleWarning>`.
 
 ## Add a passkey from your app
 
-People can add another passkey without leaving your page. `addPasskey` (browser code) opens qAuth's
-"Add a passkey" page on your app's **sign-in host**, the address its sign-in page opens on, where its
-passkeys live. The page opens in a frame over your page, or in a pop-up where the browser refuses passkeys
-in a cross-site frame (Firefox). It resolves with what happened:
+People add another passkey on **your app's own page**: your page runs the browser's passkey creation
+itself, and qAuth gives it a begin/finish ceremony through its API, with the person's access token from
+your app's client. Every app a tenant registers is the tenant's own, so qAuth takes the browser's answer
+from your page and checks it (see [Passkeys](https://auth.qapps.dev/docs/passkeys) for the whole design and why).
 
 ```ts
-import { addPasskey } from "@isdlc.ai/qauth";
+import { createPasskey, PasskeyStepNeeded, startPasskeyStep, verifyPasskeyStep } from "@isdlc.ai/qauth";
 
-async function onAddPasskeyClick() {
-  const r = await addPasskey({ signInHost: "sadeem.id.qapps.dev", clientId: "your-client-id" }); // mode: "auto" | "iframe" | "popup"
-  if (r.result === "added") console.log(`Passkey added: ${r.name}`); // "cancelled" | "error": nothing changed
+async function onAddPasskeyClick(accessToken: string) {
+  const opts = { apiBase: "https://auth.qapps.dev", accessToken };
+  try {
+    const r = await createPasskey(opts); // mode: "auto" | "page" | "popup"
+    if (r.result === "added") console.log(`Passkey added: ${r.name}`); // "cancelled": nothing changed
+  } catch (e) {
+    if (e instanceof PasskeyStepNeeded) {
+      // the sign-in isn't fresh enough for your app's passkeyAddFreshness: ask a code inline
+      const s = await startPasskeyStep(opts, "email"); // or "code" (authenticator app), "sms"
+      await verifyPasskeyStep(opts, { way: "email", step: s.step, code: prompt("Code") ?? "" });
+      await createPasskey(opts);
+    }
+  }
 }
 ```
 
-**Why your app can't make the passkey itself.** The browser makes a passkey for the site it is on, and
-qAuth checks the browser's answer: the challenge it handed out (single use, a few minutes), the ceremony,
-the origin (the sign-in host) and the authenticator's attestation. If your page ran the ceremony and your
-server passed the answer to qAuth, qAuth could not tell a forged answer from a real one. So the ceremony
-runs only on qAuth's page, and your app only hears the result. It never sees the options or the answer.
-
-- **Turn it on:** the app's "Let this app embed the add-a-passkey page" switch (Console › the app ›
-  Sign-in), or `embedPasskeyPage: true` in `qauth.app.yaml` (turning it on is marked "weakens security"). It
-  is off by default, and organizations can't turn it on.
-- **Which pages:** only the `https` origins (on real hosts) of the client's registered redirect URIs. qAuth sends
-  `Content-Security-Policy: frame-ancestors <that origin>` and refuses every other origin. For local development,
-  the app's "Also from localhost" switch (`embedPasskeyDevOrigins: true`) lets its `localhost`, `127.x` and `::1`
-  redirect URIs in too (`http` allowed there). Leave it off in production.
-- **Who:** the person confirms it's them on qAuth's page, in the same frame: their password plus their
-  authenticator code when they have one, or an existing passkey alone. A proof stays good for the platform's
-  `freshSignInMinutes` on that host. Your app's tokens are never accepted there. Someone whose only second
-  step is a code by phone adds passkeys when they next sign in.
-- **The result:** the page posts `{ type: "qauth.passkey", result: "added" | "cancelled" | "error", name? }`
-  to your origin only (never `*`), and `addPasskey` takes it only from the sign-in host's origin. It carries
-  no secrets and no ids, just the new passkey's display name.
-- **After it:** the passkey has the same home as passkeys made at sign-in, so it signs in there. Its name says
-  where it came from ("Sadeem Console · Mac · 2026-11-28"). The activity log has `passkey.added`: `origin` when
-  the browser confirmed your page as the frame's top page, else `requestedOrigin` (a pop-up's opener isn't
-  checked). The person gets an email ("…on a page opened for <app>").
-- In `auto` mode, when the frame reports `error` (the browser couldn't make the passkey there, or named no top
-  page), `addPasskey` opens the pop-up once instead. `iframe` mode resolves `error`.
-- The page shows the account the passkey is for, and takes only its own forms (`Origin` must be the sign-in host).
-- Call `addPasskey` from a click: browsers block pop-ups opened later. If you build the frame yourself, give it
-  `allow="publickey-credentials-create; publickey-credentials-get"` and open
-  `https://<sign-in host>/ui/passkeys/add?client_id=…&origin=<your page's origin>` (add `&mode=popup` for a pop-up).
+- **Freshness:** the app's `passkeyAddFreshness` (Console › the app › Sign-in, or `qauth.app.yaml`):
+  `"session"` (the default: the whole sign-in session) or a number of minutes since the sign-in's second step.
+  Fixed rule: the sign-in must have used a second factor or a passkey; a password alone gets `STEP_NEEDED`.
+  `createPasskey` then confirms with one of the person's passkeys itself (`step: "auto"`); for a code it throws
+  `PasskeyStepNeeded` with the ways. Never a full new sign-in.
+- **Where:** your page's origin must be one of your apps' redirect URI origins (`https`; `localhost` only with
+  the app's `passkeyAddDevOrigins`). CORS answers the four routes for those origins only.
+- **One passkey for the tenant:** the passkey belongs to the tenant's passkey home (its issuer address), so it
+  signs in on every app of the tenant. Browsers with Related Origin Requests (Chrome, Safari, Edge) make it on
+  your page; Firefox gets a small qAuth pop-up on the home (`mode: "auto"`). Call `createPasskey` from a click.
+- **Your server keeps the tokens?** Your page calls your own endpoints; they call
+  `qauth.as(token).account.passkeys.begin({ origin })` and `.finish({ origin, ceremony, credential })`
+  (and `.step` / `.verifyStep`), passing the options and the browser's answer through
+  (`decodeOptions` / `encodeCredential` convert them).
+- **After it:** the activity log has `passkey.added` (app, origin, path), and the person is emailed a notice
+  with a link to remove it.
+- `addPasskey` (the embedded qAuth page of 0.28.0) is removed: use `createPasskey`.
 
 ## Errors
 
@@ -428,6 +425,12 @@ A "this device" marker in the session list (tokens don't name their session).
 
 ## Changes
 
+- **0.29.0** (2026-11-28): **breaking:** `addPasskey` (the embedded qAuth page) is removed. `createPasskey({ apiBase, accessToken })`
+  (browser): add a passkey on your own page (begin/finish through qAuth's API; qAuth's pop-up on the tenant's passkey home where the
+  browser has no related origins, Firefox); the inline check `confirmWithPasskey`, `startPasskeyStep`, `verifyPasskeyStep`
+  (`PasskeyStepNeeded` when the sign-in isn't fresh by the app's `passkeyAddFreshness`); server helpers
+  `account.passkeys.begin / finish / step / verifyStep`. `SessionSettings.passkeyAddFreshness`, `passkeyAddDevOrigins`;
+  `embedPasskeyPage` / `embedPasskeyDevOrigins` are retired (always false) (qAuth EXA-630).
 - **0.28.0** (2026-11-28): `addPasskey({ signInHost, clientId, mode })` (browser): people add another passkey without
   leaving your page. It opens qAuth's "Add a passkey" page on your app's sign-in host in a frame (or a pop-up in
   Firefox), and resolves `{ result: "added" | "cancelled" | "error", name? }`, taking the result only from the sign-in

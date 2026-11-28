@@ -1144,6 +1144,22 @@ export class PersonClient {
       /** Removes one of the person's passkeys (they are listed in security()). */
       remove: (passkeyId: string, proof: Proof): Promise<{ removed: boolean }> =>
         this.t.call("DELETE", `/v1/me/passkeys/${seg(passkeyId)}`, proof),
+      /**
+       * Add a passkey on your app's page when your server keeps the tokens
+       * (EXA-630): your page calls your own endpoints, which call these with
+       * the person's token, passing the options and the browser's answer
+       * through. `origin` is your page's origin (the browser's answer must
+       * name it). `begin` throws 403 STEP_NEEDED (`error.data.ways`) when the
+       * sign-in isn't fresh by the app's passkeyAddFreshness: answer it with
+       * `step` and `verifyStep`, then begin again.
+       */
+      begin: (opts: { origin: string; popup?: boolean }): Promise<PasskeyBegin> => this.t.call("POST", "/v1/me/passkeys/begin", opts),
+      finish: (opts: { origin: string; ceremony: string; credential: unknown; name?: string }): Promise<{ id: string; name: string; rpId: string }> =>
+        this.t.call("POST", "/v1/me/passkeys/finish", opts),
+      step: (opts: { origin: string; way: "passkey" | "code" | "sms" | "email" }): Promise<{ way: string; step?: string; options?: unknown; sentTo?: string; expiresAt?: string }> =>
+        this.t.call("POST", "/v1/me/passkeys/step", opts),
+      verifyStep: (opts: { origin: string; way: "passkey" | "code" | "sms" | "email"; step?: string; answer?: unknown; code?: string }): Promise<{ confirmed: boolean; at: string }> =>
+        this.t.call("POST", "/v1/me/passkeys/step/verify", opts),
     },
     /** Ten new single-use codes, shown once (the old ones stop working). Proof needed when codes exist. */
     recoveryCodes: (proof?: Proof): Promise<{ codes: string[] }> => this.t.call("POST", "/v1/me/recovery-codes", proof ?? {}),
@@ -1229,6 +1245,17 @@ export class PersonClient {
       }
     },
   };
+}
+
+/** POST /v1/me/passkeys/begin: creation options for the tenant's passkey home, and the ceremony (single use, 5 minutes). */
+export interface PasskeyBegin {
+  ceremony: string;
+  /** For navigator.credentials.create (absent for a pop-up). */
+  options?: unknown;
+  rpId: string;
+  expiresAt: string;
+  /** A pop-up ceremony: open this address. */
+  popupUrl?: string;
 }
 
 /** A device type sessions count as. */
@@ -1346,9 +1373,13 @@ export interface SessionSettings {
   skipCompanyByDomain: boolean;
   /** When a reused shared sign-in asks a quick check: minutes without activity, always, never, or the tenant's default. */
   reverifyOnReuse: ReverifyOnReuse;
-  /** The app's pages may embed qAuth's add-a-passkey page (see addPasskey; off by default). */
+  /** Adding a passkey from the app's own page (createPasskey): "session" (default) or minutes since the sign-in's second step. */
+  passkeyAddFreshness: "session" | number;
+  /** Development only: the add-a-passkey API answers localhost origins of the redirect URIs too (off by default). */
+  passkeyAddDevOrigins: boolean;
+  /** @deprecated Retired with the embedded add-a-passkey page (always false). */
   embedPasskeyPage: boolean;
-  /** Development only: localhost origins of the redirect URIs may embed it too (off by default). */
+  /** @deprecated Retired (always false). */
   embedPasskeyDevOrigins: boolean;
 }
 
@@ -1707,7 +1738,10 @@ export { qauthProxy, type ProxyOptions } from "./proxy.js";
 export { Verifier, bearerToken, errorResponse, identityOf, type VerifierOptions, type Identity, type ConnectMiddleware, type MiddlewareRequest, type MiddlewareResponse } from "./verify.js";
 export { TokenErrorCode, parseRetryAfter } from "./errors.js";
 export { startDeviceSignIn, pollDeviceToken, pairDevice, type DeviceSignIn, type DeviceSignInOptions, type DeviceTokens } from "./device.js";
-export { addPasskey, addPasskeyUrl, signInOrigin, type AddPasskeyOptions, type AddPasskeyResult, type AddPasskeyMode } from "./addpasskey.js";
+export {
+  createPasskey, confirmWithPasskey, startPasskeyStep, verifyPasskeyStep, relatedOriginsSupported, decodeOptions, encodeCredential,
+  PasskeyStepNeeded, PasskeyError, type CreatePasskeyOptions, type CreatedPasskey,
+} from "./passkeys.js";
 export { watchIdle, sessionIdOf, type IdleWatch, type IdleWatchOptions, type IdleSource, type IdleWarning, type SessionState, type SessionEnd, type StreamResponse } from "./idle.js";
 
 export default QAuth;
